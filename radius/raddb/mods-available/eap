@@ -1,0 +1,49 @@
+# EAP: PEAP (inner EAP-MSCHAPv2) and EAP-TTLS (inner PAP). Weak methods (MD5, GTC, LEAP) are not loaded.
+eap {
+	default_eap_type = peap
+	timer_expire = 60
+	ignore_unknown_eap_types = no
+	cisco_accounting_username_bug = no
+	max_sessions = ${max_requests}
+
+	tls-config tls-common {
+		private_key_file = ${certdir}/lab/server.key
+		certificate_file = ${certdir}/lab/server.pem
+		ca_file = ${certdir}/lab/ca.pem
+		cipher_list = "HIGH:!aNULL:!MD5:!RC4:!3DES"
+		cipher_server_preference = yes
+		tls_min_version = "1.2"
+		# TLS 1.3 inside PEAP/TTLS is still unreliable on many clients
+		tls_max_version = "1.2"
+		ecdh_curve = ""
+
+		cache {
+			enable = no
+		}
+		verify {
+		}
+		ocsp {
+			enable = no
+		}
+	}
+
+	ttls {
+		tls = tls-common
+		default_eap_type = mschapv2
+		copy_request_to_tunnel = no
+		use_tunneled_reply = no
+		virtual_server = "inner-tunnel"
+	}
+
+	peap {
+		tls = tls-common
+		default_eap_type = mschapv2
+		copy_request_to_tunnel = no
+		use_tunneled_reply = no
+		virtual_server = "inner-tunnel"
+	}
+
+	mschapv2 {
+		send_error = no
+	}
+}

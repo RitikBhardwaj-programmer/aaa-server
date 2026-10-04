@@ -1,0 +1,101 @@
+# AAA lab: OpenLDAP (identity store) + FreeRADIUS (AAA server) + phpLDAPadmin (admin UI)
+# Start:  docker compose up -d --build
+# Test:   docker compose --profile test run --rm tests
+name: aaa-lab
+
+services:
+  ldap:
+    build: ./ldap
+    hostname: ldap
+    restart: unless-stopped
+    environment:
+      LDAP_BASE_DN: ${LDAP_BASE_DN}
+      LDAP_DOMAIN: ${LDAP_DOMAIN}
+      LDAP_ORG: ${LDAP_ORG}
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      LDAP_RADIUS_PASSWORD: ${LDAP_RADIUS_PASSWORD}
+      TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
+    volumes:
+      - ldap-config:/etc/ldap/slapd.d
+      - ldap-data:/var/lib/ldap
+    networks:
+      aaa:
+        ipv4_address: 10.89.0.10
+    # No published port: only FreeRADIUS and phpLDAPadmin reach LDAP, over the internal network.
+
+  radius:
+    build: ./radius
+    hostname: radius
+    restart: unless-stopped
+    depends_on:
+      ldap:
+        condition: service_healthy
+    environment:
+      LDAP_BASE_DN: ${LDAP_BASE_DN}
+      LDAP_RADIUS_PASSWORD: ${LDAP_RADIUS_PASSWORD}
+      RADIUS_SECRET_LOCAL: ${RADIUS_SECRET_LOCAL}
+      RADIUS_SECRET_AP: ${RADIUS_SECRET_AP}
+      AP_IP: ${AP_IP}
+      TZ: ${TZ}
+    ports:
+      - "1812:1812/udp"   # authentication
+      - "1813:1813/udp"   # accounting
+    volumes:
+      - ./certs:/certs-src:ro
+      - radius-acct:/var/log/freeradius
+    networks:
+      aaa:
+        ipv4_address: 10.89.0.20
+
+  ldapadmin:
+    image: phpldapadmin/phpldapadmin:2.3.11
+    restart: unless-stopped
+    depends_on:
+      ldap:
+        condition: service_healthy
+    environment:
+      LDAP_HOST: ldap
+      LDAP_BASE_DN: ${LDAP_BASE_DN}
+      LDAP_LOGIN_ATTR: DN
+      # Only the cn=admin entry may log in; Wi-Fi users (inetOrgPerson) cannot
+      LDAP_LOGIN_OBJECTCLASS: organizationalRole
+      APP_KEY: ${PLA_APP_KEY}
+      APP_TIMEZONE: ${TZ}
+    ports:
+      - "127.0.0.1:8080:8080"   # localhost only, never exposed to the LAN
+    volumes:
+      - pla-sessions:/app/storage/framework/sessions
+      - pla-logs:/app/storage/logs
+    networks:
+      aaa:
+        ipv4_address: 10.89.0.30
+
+  tests:
+    build: ./tests
+    profiles: ["test"]
+    depends_on:
+      radius:
+        condition: service_started
+    environment:
+      LDAP_BASE_DN: ${LDAP_BASE_DN}
+      TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
+      RADIUS_SECRET_LOCAL: ${RADIUS_SECRET_LOCAL}
+    volumes:
+      - ./certs/ca.pem:/certs/ca.pem:ro
+      - radius-acct:/radius-acct:ro
+    networks:
+      aaa:
+        ipv4_address: 10.89.0.50
+
+networks:
+  aaa:
+    ipam:
+      config:
+        - subnet: 10.89.0.0/24   # fixed, avoids 172.17.x (your campus LAN)
+
+volumes:
+  ldap-config:
+  ldap-data:
+  radius-acct:
+  pla-sessions:
+  pla-logs:

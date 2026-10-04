@@ -1,0 +1,67 @@
+# Inner server: runs inside the PEAP / EAP-TTLS TLS tunnel with the user's real identity.
+#   PEAP      -> inner EAP-MSCHAPv2 -> NT hash from LDAP (sambaNTPassword)
+#   EAP-TTLS  -> inner PAP          -> LDAP bind as the user
+server inner-tunnel {
+
+listen {
+	ipaddr = 127.0.0.1
+	port = 18120
+	type = auth
+}
+
+authorize {
+	filter_username
+	mschap
+
+	eap {
+		ok = return
+	}
+
+	ldap
+
+	if ((ok || updated) && User-Password && !control:Auth-Type) {
+		update control {
+			&Auth-Type := ldap
+		}
+	}
+
+	# Converts the hex NT hash from LDAP to binary, as mschap needs. Auth-Type is already set above.
+	pap
+}
+
+authenticate {
+	Auth-Type LDAP {
+		ldap
+	}
+	Auth-Type MS-CHAP {
+		mschap
+	}
+	eap
+}
+
+session {
+}
+
+post-auth {
+	# Authorization: LDAP group -> reject, or session limits + VLAN (policy.d/campus)
+	campus_authorize
+
+	# Hand the result to the outer server, which puts it in the final Access-Accept.
+	# User-Name lets the AP use the real identity (not "anonymous") in accounting.
+	update outer.session-state {
+		&User-Name := &request:User-Name
+		&Session-Timeout := &reply:Session-Timeout
+		&Tunnel-Type := &reply:Tunnel-Type
+		&Tunnel-Medium-Type := &reply:Tunnel-Medium-Type
+		&Tunnel-Private-Group-Id := &reply:Tunnel-Private-Group-Id
+		&Class := &reply:Class
+	}
+
+	Post-Auth-Type REJECT {
+		update outer.session-state {
+			&User-Name := &request:User-Name
+		}
+		attr_filter.access_reject
+	}
+}
+}

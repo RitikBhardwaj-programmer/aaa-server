@@ -1,0 +1,60 @@
+# LDAP module: user lookup, password check (bind) and group membership.
+ldap {
+	server = 'ldap'
+	port = 389
+
+	# Read-only service account (see ldap/entrypoint.sh ACLs)
+	identity = "cn=radius,ou=Services,$ENV{LDAP_BASE_DN}"
+	password = "$ENV{LDAP_RADIUS_PASSWORD}"
+	base_dn = "$ENV{LDAP_BASE_DN}"
+
+	sasl {
+	}
+
+	# NT hash for PEAP-MSCHAPv2. TTLS/PAP does not need it: it uses an LDAP bind as the user.
+	update {
+		control:NT-Password := 'sambaNTPassword'
+	}
+
+	user_dn = "LDAP-UserDn"
+	user {
+		base_dn = "${..base_dn}"
+		filter = "(&(objectClass=inetOrgPerson)(uid=%{%{Stripped-User-Name}:-%{User-Name}}))"
+		sasl {
+		}
+	}
+
+	# groupOfNames entries under ou=Groups; used by the LDAP-Group check in policy.d/campus
+	group {
+		base_dn = "ou=Groups,${..base_dn}"
+		filter = '(objectClass=groupOfNames)'
+		name_attribute = cn
+		membership_filter = "(member=%{control:LDAP-UserDn})"
+		cacheable_name = no
+		cacheable_dn = no
+	}
+
+	options {
+		chase_referrals = no
+		rebind = no
+		res_timeout = 10
+		srv_timelimit = 3
+		net_timeout = 1
+		idle = 60
+		probes = 3
+		interval = 3
+		ldap_debug = 0x0000
+	}
+
+	pool {
+		start = 1
+		min = 1
+		max = ${thread[pool].max_servers}
+		spare = 2
+		uses = 0
+		retry_delay = 30
+		lifetime = 0
+		idle_timeout = 60
+		max_retries = 5
+	}
+}

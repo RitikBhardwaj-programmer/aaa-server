@@ -1,0 +1,44 @@
+# SQL module, used only for accounting (radacct) and the post-auth log (radpostauth).
+# It is NOT used to look up users: LDAP is the only identity store.
+sql {
+	dialect = "sqlite"
+	driver = "rlm_sql_sqlite"
+
+	sqlite {
+		filename = "${logdir}/sqlite/radius.db"
+		busy_timeout = 1000
+		# Creates the standard schema the first time the database file is missing
+		bootstrap = "${modconfdir}/${..:name}/main/sqlite/schema.sql"
+	}
+
+	# Log the real (inner) identity, not the anonymous outer identity of PEAP/TTLS
+	sql_user_name = "%{%{reply:User-Name}:-%{%{session-state:User-Name}:-%{User-Name}}}"
+
+	radius_db = "radius"
+	acct_table1 = "radacct"
+	acct_table2 = "radacct"
+	postauth_table = "radpostauth"
+	authcheck_table = "radcheck"
+	groupcheck_table = "radgroupcheck"
+	authreply_table = "radreply"
+	groupreply_table = "radgroupreply"
+	usergroup_table = "radusergroup"
+	delete_stale_sessions = yes
+	read_clients = no
+	client_table = "nas"
+	group_attribute = "SQL-Group"
+
+	pool {
+		start = 1
+		min = 1
+		max = 4
+		spare = 1
+		uses = 0
+		retry_delay = 30
+		lifetime = 0
+		idle_timeout = 60
+		max_retries = 5
+	}
+
+	$INCLUDE ${modconfdir}/${.:name}/main/${dialect}/queries.conf
+}

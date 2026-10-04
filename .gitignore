@@ -1,0 +1,4 @@
+# Secrets and generated material — never commit
+.env
+certs/*
+!certs/make-certs.sh

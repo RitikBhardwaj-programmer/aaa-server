@@ -1,0 +1,9 @@
+# Test users created on first start. All get TEST_USER_PASSWORD from .env.
+# uid | full name | organizational unit | groups (comma separated)
+# Groups: students, faculty, staff, guests. Membership in "disabled" blocks Wi-Fi access.
+student001|Test Student One|Students|students
+24IT001|IT Student 24IT001|Students|students
+faculty001|Test Faculty One|Faculty|faculty
+staff001|Test Staff One|Staff|staff
+guest001|Test Guest One|Guests|guests
+disabled001|Disabled Student One|Students|students,disabled

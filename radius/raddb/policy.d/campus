@@ -1,0 +1,67 @@
+# Campus authorization policy (the second "A" of AAA).
+# Runs after the password is verified. The LDAP group decides the session limits and the VLAN.
+#
+#   group      Session-Timeout   VLAN
+#   faculty    12 h              20
+#   staff      12 h              20
+#   students    8 h              10
+#   guests      2 h              30
+#   disabled   -> Access-Reject (checked first, so it overrides every other group)
+#   no group   -> Access-Reject
+#
+# Class carries the group name; the AP echoes it in every accounting packet,
+# so accounting records show which group each session belongs to.
+campus_authorize {
+	if (LDAP-Group == "disabled") {
+		update reply {
+			&Reply-Message := "Account disabled. Contact the network office."
+		}
+		reject
+	}
+	elsif (LDAP-Group == "faculty") {
+		update reply {
+			&Session-Timeout := 43200
+			&Tunnel-Type := VLAN
+			&Tunnel-Medium-Type := IEEE-802
+			&Tunnel-Private-Group-Id := "20"
+			&Class := "faculty"
+			&Reply-Message := "Welcome, faculty member."
+		}
+	}
+	elsif (LDAP-Group == "staff") {
+		update reply {
+			&Session-Timeout := 43200
+			&Tunnel-Type := VLAN
+			&Tunnel-Medium-Type := IEEE-802
+			&Tunnel-Private-Group-Id := "20"
+			&Class := "staff"
+			&Reply-Message := "Welcome, staff member."
+		}
+	}
+	elsif (LDAP-Group == "students") {
+		update reply {
+			&Session-Timeout := 28800
+			&Tunnel-Type := VLAN
+			&Tunnel-Medium-Type := IEEE-802
+			&Tunnel-Private-Group-Id := "10"
+			&Class := "students"
+			&Reply-Message := "Welcome, student."
+		}
+	}
+	elsif (LDAP-Group == "guests") {
+		update reply {
+			&Session-Timeout := 7200
+			&Tunnel-Type := VLAN
+			&Tunnel-Medium-Type := IEEE-802
+			&Tunnel-Private-Group-Id := "30"
+			&Class := "guests"
+			&Reply-Message := "Welcome, guest."
+		}
+	}
+	else {
+		update reply {
+			&Reply-Message := "No Wi-Fi access group assigned."
+		}
+		reject
+	}
+}

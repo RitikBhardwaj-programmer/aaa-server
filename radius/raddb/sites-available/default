@@ -1,0 +1,97 @@
+# Outer RADIUS server: receives Access-Request from the AP (and test tools) and Accounting-Request.
+# Wi-Fi users arrive with EAP (PEAP / TTLS); the real identity is checked in sites-available/inner-tunnel.
+# Plain PAP (radtest) is also accepted, so the LDAP path can be tested without EAP.
+server default {
+
+listen {
+	type = auth
+	ipaddr = *
+	port = 0
+	limits {
+		max_connections = 16
+		lifetime = 0
+		idle_timeout = 30
+	}
+}
+
+listen {
+	type = acct
+	ipaddr = *
+	port = 0
+}
+
+# --- Authentication: who are you? ---
+authorize {
+	filter_username
+	preprocess
+
+	# EAP conversation in progress: the eap module handles it
+	eap {
+		ok = return
+	}
+
+	# Non-EAP request (e.g. radtest with PAP): look the user up in LDAP and check the password with a bind
+	if (!EAP-Message) {
+		ldap
+		if ((ok || updated) && User-Password && !control:Auth-Type) {
+			update control {
+				&Auth-Type := ldap
+			}
+		}
+	}
+}
+
+authenticate {
+	Auth-Type LDAP {
+		ldap
+	}
+	eap
+}
+
+# --- Accounting: what happened? ---
+preacct {
+	preprocess
+	acct_unique
+}
+
+accounting {
+	# Plain-text copy per NAS per day: /var/log/freeradius/radacct/<nas-ip>/detail-YYYYMMDD
+	detail
+	# Queryable copy: SQLite table radacct
+	sql
+	attr_filter.accounting_response
+}
+
+session {
+}
+
+# --- Authorization: what may you do? ---
+post-auth {
+	# For EAP the policy already ran in the inner tunnel; its result is in session-state
+	if (!EAP-Message) {
+		campus_authorize
+	}
+
+	# Copy only the inner-tunnel result. ":=" replaces the outer "anonymous" User-Name
+	# instead of adding a second one. Missing attributes are skipped.
+	update reply {
+		&User-Name := &session-state:User-Name
+		&Session-Timeout := &session-state:Session-Timeout
+		&Tunnel-Type := &session-state:Tunnel-Type
+		&Tunnel-Medium-Type := &session-state:Tunnel-Medium-Type
+		&Tunnel-Private-Group-Id := &session-state:Tunnel-Private-Group-Id
+		&Class := &session-state:Class
+	}
+
+	# Log the accept in SQLite table radpostauth
+	sql
+	remove_reply_message_if_eap
+
+	Post-Auth-Type REJECT {
+		sql
+		attr_filter.access_reject
+		eap
+		remove_reply_message_if_eap
+	}
+}
+}
