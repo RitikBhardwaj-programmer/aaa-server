@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Campus Wi-Fi AAA Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: engineering manual — sticky section index on the left, one reading column on the right; stacks to one column on phones. */
+:root {
+  --bg: #f2f5f7;
+  --surface: #ffffff;
+  --ink: #13202b;
+  --muted: #566573;
+  --line: #d3dbe2;
+  --accent: #0a6a94;
+  --accent-soft: #e1eff6;
+  --accept: #2d7a4d;
+  --reject: #b0393a;
+  --code-bg: #e8edf1;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", Consolas, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e151b; --surface: #151f28; --ink: #e2e9ef; --muted: #93a2b0; --line: #26343f;
+    --accent: #52b4dc; --accent-soft: #15303f; --accept: #63c08a; --reject: #e27b7b; --code-bg: #1a2731;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e151b; --surface: #151f28; --ink: #e2e9ef; --muted: #93a2b0; --line: #26343f;
+  --accent: #52b4dc; --accent-soft: #15303f; --accept: #63c08a; --reject: #e27b7b; --code-bg: #1a2731;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  padding-inline: 16px; padding-block: 0 64px;
+}
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 960px) { .shell { grid-template-columns: minmax(0, 1fr); gap: 0; } }
+
+/* Index */
+nav.index { position: sticky; top: env(safe-area-inset-top, 0px); align-self: start; padding-block: 32px; max-height: 100vh; overflow-y: auto; }
+nav.index h2 { font-family: var(--font-display); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+nav.index ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: s; }
+nav.index li { counter-increment: s; }
+nav.index a { display: grid; grid-template-columns: 28px 1fr; color: var(--ink); text-decoration: none; font-size: 14px; padding: 4px 8px; border-radius: 4px; }
+nav.index a::before { content: counter(s, decimal-leading-zero); font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding-top: 2px; }
+nav.index a:hover, nav.index a:focus-visible { background: var(--accent-soft); outline: none; }
+@media (max-width: 960px) {
+  nav.index { position: static; max-height: none; padding-block: 16px 0; border-bottom: 1px solid var(--line); }
+  nav.index ol { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+}
+
+main { min-width: 0; }
+header.hero { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; color: var(--accent); text-transform: uppercase; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(34px, 6vw, 56px); line-height: 1.02; margin: 8px 0 16px; text-wrap: balance; letter-spacing: -.01em; }
+.lede { font-size: 18px; max-width: 64ch; margin: 0 0 20px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-family: var(--font-mono); font-size: 12px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); }
+.chip.ok { border-color: var(--accept); color: var(--accept); }
+.chip.warn { border-color: var(--reject); color: var(--reject); }
+
+section { padding-block: 40px 8px; border-bottom: 1px solid var(--line); }
+section > h2 { font-family: var(--font-display); font-weight: 600; font-size: 30px; line-height: 1.15; margin: 0 0 6px; text-wrap: balance; display: flex; gap: 14px; align-items: baseline; }
+section > h2 .num { font-family: var(--font-mono); font-size: 14px; color: var(--accent); font-weight: 500; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 21px; margin: 32px 0 8px; }
+h4 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 22px 0 6px; letter-spacing: .02em; }
+p, ul, ol.steps { max-width: 70ch; }
+p { margin: 0 0 14px; }
+ul { padding-left: 20px; margin: 0 0 14px; }
+li { margin-bottom: 4px; }
+a { color: var(--accent); }
+code { font-family: var(--font-mono); font-size: .88em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; overflow-wrap: anywhere; }
+.summary { font-size: 17px; color: var(--muted); margin-bottom: 20px; }
+
+figure { margin: 20px 0 24px; }
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; overflow-x: auto; }
+.diagram pre.mermaid { margin: 0; background: transparent; font-family: var(--font-body); text-align: center; }
+figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 70ch; }
+
+.code { margin: 14px 0 20px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--code-bg); }
+.code .file { font-family: var(--font-mono); font-size: 12px; padding: 6px 12px; border-bottom: 1px solid var(--line); color: var(--muted); background: var(--surface); }
+.code pre { margin: 0; padding: 12px 14px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.55; tab-size: 4; }
+.code pre .c { color: var(--muted); }
+
+.table-wrap { overflow-x: auto; margin: 14px 0 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 13px; }
+.pill { font-family: var(--font-mono); font-size: 12px; padding: 1px 7px; border-radius: 10px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.accept { color: var(--accept); }
+.pill.reject { color: var(--reject); }
+
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; margin: 16px 0 20px; max-width: 74ch; border-radius: 0 6px 6px 0; }
+.callout.bug { border-left-color: var(--reject); }
+.callout p:last-child { margin-bottom: 0; }
+.callout strong:first-child { font-family: var(--font-display); letter-spacing: .02em; }
+
+.aaa { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 18px 0 24px; }
+@media (max-width: 720px) { .aaa { grid-template-columns: minmax(0, 1fr); } }
+.aaa div { background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--accent); padding: 14px 16px; border-radius: 0 0 6px 6px; min-width: 0; }
+.aaa h4 { margin: 0 0 2px; font-size: 18px; }
+.aaa .q { font-style: italic; color: var(--muted); margin-bottom: 8px; }
+.aaa p { font-size: 14px; margin-bottom: 6px; }
+
+footer { padding-block: 32px; color: var(--muted); font-size: 14px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+section { scroll-margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="index" aria-label="Sections">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#problem">The problem</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#login">One login, step by step</a></li>
+    <li><a href="#aaa">AAA in this lab</a></li>
+    <li><a href="#repo">Repository map</a></li>
+    <li><a href="#compose">docker-compose.yml</a></li>
+    <li><a href="#ldap">OpenLDAP container</a></li>
+    <li><a href="#certs">Certificates</a></li>
+    <li><a href="#radius">FreeRADIUS container</a></li>
+    <li><a href="#sites">Request processing</a></li>
+    <li><a href="#policy">Authorization policy</a></li>
+    <li><a href="#accounting">Accounting</a></li>
+    <li><a href="#pla">phpLDAPadmin</a></li>
+    <li><a href="#tests">Test suite</a></li>
+    <li><a href="#scripts">PowerShell scripts</a></li>
+    <li><a href="#nat">The Docker NAT problem</a></li>
+    <li><a href="#bugs">Bugs found and fixed</a></li>
+    <li><a href="#security">Security model</a></li>
+    <li><a href="#next">Next: the real AP</a></li>
+    <li><a href="#glossary">Glossary</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <div class="eyebrow">Networking Project · aaa-server/ · commit 55e705f</div>
+  <h1>Campus Wi-Fi AAA Lab</h1>
+  <p class="lede">A personal Wi-Fi login for every student, built with OpenLDAP and FreeRADIUS in Docker. This page explains the whole system: how one login travels through it, and what every file in the repository does.</p>
+  <div class="chips">
+    <span class="chip ok">28 / 28 end-to-end tests pass</span>
+    <span class="chip">FreeRADIUS 3.2.10</span>
+    <span class="chip">OpenLDAP 2.5.13</span>
+    <span class="chip">PEAP-MSCHAPv2 + EAP-TTLS/PAP</span>
+    <span class="chip">UDP 1812 / 1813</span>
+    <span class="chip warn">AP: DIR-X6060 Enterprise support unconfirmed</span>
+  </div>
+</header>
+
+<!-- 1 -->
+<section id="problem">
+  <h2><span class="num">01</span>The problem</h2>
+  <p class="summary">The college Wi-Fi uses one shared password. This lab replaces it with one identity per person.</p>
+  <p>With a shared password (WPA2-Personal), everybody who knows it can connect. You cannot tell who connected, and you cannot block one person. If the password leaks, you must change it for everyone.</p>
+  <p>WPA2-Enterprise (802.1X) fixes this. Each person logs in with their own user ID and password, for example <code>24IT001</code>. The access point does not check the password itself. It asks a central server, which checks a central directory. That central server is the subject of this lab.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th></th><th>WPA2-Personal (today)</th><th>WPA2-Enterprise (this lab)</th></tr></thead>
+    <tbody>
+      <tr><td>Credential</td><td>One password for all</td><td>One user ID + password per person</td></tr>
+      <tr><td>Block one user</td><td>Not possible</td><td>Add the user to <code>cn=disabled</code></td></tr>
+      <tr><td>Who was online?</td><td>Unknown</td><td>Every session logged with user, device, time, bytes</td></tr>
+      <tr><td>Different rules per group</td><td>No</td><td>Session limit and VLAN per LDAP group</td></tr>
+      <tr><td>Password leak</td><td>Change it for everyone</td><td>Reset one account</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- 2 -->
+<section id="architecture">
+  <h2><span class="num">02</span>Architecture</h2>
+  <p class="summary">Four containers on one Windows PC. Only FreeRADIUS is reachable from the network.</p>
+  <figure>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph Clients["Wi-Fi clients (supplicants)"]
+    L["Laptop"]
+    P["Phone"]
+  end
+  AP["D-Link DIR-X6060<br/>authenticator / NAS"]
+  subgraph Host["Windows PC · Docker Desktop · network 10.89.0.0/24"]
+    R["radius · 10.89.0.20<br/>FreeRADIUS 3.2.10"]
+    D["ldap · 10.89.0.10<br/>OpenLDAP slapd"]
+    A["ldapadmin · 10.89.0.30<br/>phpLDAPadmin"]
+    T["tests · 10.89.0.50<br/>eapol_test, radclient"]
+    V[("radius-acct volume<br/>SQLite + detail files")]
+  end
+  ADM["Admin browser<br/>127.0.0.1:8080"]
+  L -- "EAPOL (EAP over Wi-Fi)" --> AP
+  P -- "EAPOL" --> AP
+  AP -- "RADIUS UDP 1812 auth<br/>UDP 1813 acct" --> R
+  R -- "LDAP 389" --> D
+  R --> V
+  A -- "LDAP 389" --> D
+  ADM --> A
+  T -. "test traffic" .-> R
+</pre></div>
+    <figcaption>Figure 1. Components and protocols. The <code>ldap</code> service has no published port. phpLDAPadmin is published only on <code>127.0.0.1</code>, so other machines cannot reach it.</figcaption>
+  </figure>
+  <p>Each protocol covers one hop:</p>
+  <ul>
+    <li><strong>EAPOL</strong> carries EAP between the device and the AP. The device has no IP address yet at this point.</li>
+    <li><strong>RADIUS</strong> carries the same EAP messages between the AP and FreeRADIUS, inside <code>EAP-Message</code> attributes.</li>
+    <li><strong>LDAP</strong> is how FreeRADIUS finds the user, checks the password and reads group membership.</li>
+  </ul>
+  <p>Only after an Access-Accept does the AP open the port. Then the device uses DHCP to get an IP address.</p>
+</section>
+
+<!-- 3 -->
+<section id="login">
+  <h2><span class="num">03</span>One login, step by step</h2>
+  <p class="summary">A PEAP-MSCHAPv2 login by <code>faculty001</code>, as the test suite runs it.</p>
+  <figure>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant S as Device (supplicant)
+  participant AP as AP (NAS)
+  participant O as FreeRADIUS: server default
+  participant I as FreeRADIUS: server inner-tunnel
+  participant D as OpenLDAP
+  S->>AP: EAP-Response/Identity "anonymous"
+  AP->>O: Access-Request (EAP-Message)
+  O-->>AP: Access-Challenge: start PEAP
+  Note over S,O: TLS handshake over several challenge rounds. The device checks the server certificate against ca.pem and the name radius.nitsrinagar.lab
+  S->>O: inside TLS: real identity "faculty001"
+  O->>I: tunneled request, User-Name = faculty001
+  I->>D: search (uid=faculty001) as cn=radius
+  D-->>I: DN + sambaNTPassword
+  I->>I: mschap verifies the MSCHAPv2 response with the NT hash
+  I->>D: group search (member = user DN)
+  D-->>I: cn=faculty
+  I->>I: campus_authorize: Session-Timeout 43200, VLAN 20, Class "faculty"
+  I-->>O: inner accept, result stored in outer.session-state
+  O-->>AP: Access-Accept + User-Name, Session-Timeout, Tunnel-*, Class, MPPE keys
+  AP-->>S: EAP-Success, 4-way handshake, port opens
+  AP->>O: Accounting-Request Start (UDP 1813)
+</pre></div>
+    <figcaption>Figure 2. The outer identity is <code>anonymous</code>, so the real user ID never travels outside TLS. The real identity is checked only in the inner tunnel.</figcaption>
+  </figure>
+  <h3>RADIUS packets you will see</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">Code</th><th>Packet</th><th>Direction</th><th>Meaning here</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>Access-Request</td><td>AP → server</td><td>Carries one EAP message from the device</td></tr>
+      <tr><td class="num">11</td><td>Access-Challenge</td><td>server → AP</td><td>"Send me the next EAP message" (one per TLS round)</td></tr>
+      <tr><td class="num">2</td><td>Access-Accept</td><td>server → AP</td><td>Login OK, with authorization attributes</td></tr>
+      <tr><td class="num">3</td><td>Access-Reject</td><td>server → AP</td><td>Wrong password, unknown user, disabled, or no group</td></tr>
+      <tr><td class="num">4 / 5</td><td>Accounting-Request / Response</td><td>AP ↔ server</td><td>Session Start, Interim-Update, Stop</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Attributes in the Access-Accept</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">No.</th><th>Attribute</th><th>Example</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td><code>User-Name</code></td><td>faculty001</td><td>Real identity. The AP reuses it in accounting instead of "anonymous".</td></tr>
+      <tr><td class="num">27</td><td><code>Session-Timeout</code></td><td>43200</td><td>Seconds until the AP must re-authenticate the device</td></tr>
+      <tr><td class="num">64</td><td><code>Tunnel-Type</code></td><td>VLAN (13)</td><td>Dynamic VLAN assignment, part 1</td></tr>
+      <tr><td class="num">65</td><td><code>Tunnel-Medium-Type</code></td><td>IEEE-802 (6)</td><td>Dynamic VLAN assignment, part 2</td></tr>
+      <tr><td class="num">81</td><td><code>Tunnel-Private-Group-Id</code></td><td>"20"</td><td>The VLAN number</td></tr>
+      <tr><td class="num">25</td><td><code>Class</code></td><td>"faculty"</td><td>The AP echoes it in every accounting packet</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- 4 -->
+<section id="aaa">
+  <h2><span class="num">04</span>AAA in this lab</h2>
+  <p class="summary">Each "A" maps to specific configuration in the repository.</p>
+  <div class="aaa">
+    <div>
+      <h4>Authentication</h4>
+      <div class="q">Who are you?</div>
+      <p>PEAP-MSCHAPv2 checks the NT hash from LDAP. EAP-TTLS/PAP binds to LDAP as the user.</p>
+      <p><code>mods-available/eap</code>, <code>mods-available/ldap</code>, <code>sites-available/inner-tunnel</code></p>
+    </div>
+    <div>
+      <h4>Authorization</h4>
+      <div class="q">What may you do?</div>
+      <p>The LDAP group decides: reject, or a session limit, a VLAN and a Class.</p>
+      <p><code>policy.d/campus</code>, called from <code>post-auth</code></p>
+    </div>
+    <div>
+      <h4>Accounting</h4>
+      <div class="q">What happened?</div>
+      <p>Start, Interim-Update and Stop records go to SQLite <code>radacct</code> and to daily detail files. Login attempts go to <code>radpostauth</code>.</p>
+      <p><code>mods-available/sql</code>, <code>accounting { detail sql }</code></p>
+    </div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section id="repo">
+  <h2><span class="num">05</span>Repository map</h2>
+  <p class="summary">24 committed files, about 1,280 lines. Secrets and keys are git-ignored.</p>
+  <div class="code"><div class="file">aaa-server/</div><pre>docker-compose.yml          <span class="c"># 4 services, fixed network 10.89.0.0/24, 5 volumes</span>
+.env.example                <span class="c"># template; init.ps1 writes .env with random secrets</span>
+.gitignore / .gitattributes <span class="c"># ignore .env and certs/*; force LF for Linux files</span>
+README.md                   <span class="c"># lab guide</span>
+ldap/
+  Dockerfile                <span class="c"># Debian slapd + Samba schema</span>
+  entrypoint.sh             <span class="c"># first start: config, ACLs, base tree, seed users</span>
+  add-user.sh               <span class="c"># create a user with SSHA + NT hash, add to groups</span>
+  seed/users.txt            <span class="c"># 6 test users</span>
+radius/
+  Dockerfile                <span class="c"># official FreeRADIUS image + our 7 files</span>
+  radius-start.sh           <span class="c"># install certs with safe ownership, then start</span>
+  raddb/clients.conf        <span class="c"># who may send RADIUS (NAS list)</span>
+  raddb/mods-available/{ldap,eap,sql}
+  raddb/sites-available/{default,inner-tunnel}
+  raddb/policy.d/campus     <span class="c"># group → session limit / VLAN / reject</span>
+certs/make-certs.sh         <span class="c"># lab CA + server certificate</span>
+tests/Dockerfile, run-tests.sh   <span class="c"># 28-check end-to-end suite</span>
+scripts/init.ps1, test.ps1, acct.ps1</pre></div>
+  <p>The FreeRADIUS image ships about 200 config files. The project replaces only 7 of them. Everything else stays stock, so you can read the difference from upstream at a glance.</p>
+</section>
+
+<!-- 6 -->
+<section id="compose">
+  <h2><span class="num">06</span>docker-compose.yml</h2>
+  <p class="summary">Defines the services, the private network, the published ports and the volumes.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Service</th><th>Built from</th><th>IP</th><th>Published</th><th>Volumes</th></tr></thead>
+    <tbody>
+      <tr><td><code>ldap</code></td><td><code>./ldap</code></td><td class="num">10.89.0.10</td><td>none</td><td><code>ldap-config</code>, <code>ldap-data</code></td></tr>
+      <tr><td><code>radius</code></td><td><code>./radius</code></td><td class="num">10.89.0.20</td><td>1812/udp, 1813/udp on all interfaces</td><td><code>./certs</code> (read-only), <code>radius-acct</code></td></tr>
+      <tr><td><code>ldapadmin</code></td><td><code>phpldapadmin/phpldapadmin:2.3.11</code></td><td class="num">10.89.0.30</td><td>127.0.0.1:8080 only</td><td><code>pla-sessions</code>, <code>pla-logs</code></td></tr>
+      <tr><td><code>tests</code></td><td><code>./tests</code> (profile <code>test</code>)</td><td class="num">10.89.0.50</td><td>none</td><td><code>ca.pem</code>, <code>radius-acct</code> (read-only)</td></tr>
+    </tbody>
+  </table></div>
+  <h4>Design decisions</h4>
+  <ul>
+    <li><strong>Fixed subnet <code>10.89.0.0/24</code>.</strong> Your campus LAN is <code>172.17.28.0</code>, which overlaps Docker's default <code>172.17.0.0/16</code>. A fixed subnet avoids that conflict.</li>
+    <li><strong>Fixed IPs.</strong> <code>clients.conf</code> identifies the test runner by <code>10.89.0.50</code>, so its address must not change.</li>
+    <li><strong>Explicit environment lists.</strong> Each service gets only the secrets it needs. For example, <code>ldap</code> never sees the RADIUS shared secrets.</li>
+    <li><strong>Health-gated start.</strong> <code>radius</code> and <code>ldapadmin</code> wait until <code>ldap</code> is <code>service_healthy</code>. The health check is an anonymous rootDSE search.</li>
+    <li><strong>Test profile.</strong> <code>tests</code> starts only with <code>--profile test</code>, so <code>docker compose up</code> does not run it.</li>
+  </ul>
+</section>
+
+<!-- 7 -->
+<section id="ldap">
+  <h2><span class="num">07</span>OpenLDAP container</h2>
+  <p class="summary">The identity store. It holds users, password hashes and group membership.</p>
+
+  <h3>ldap/Dockerfile — two stages</h3>
+  <p>PEAP-MSCHAPv2 needs the <code>sambaNTPassword</code> attribute, which is defined in the Samba LDAP schema. Debian ships that schema only inside the large <code>samba</code> package. Stage 1 downloads the <code>.deb</code> and extracts the one file. Stage 2 installs only <code>slapd</code>, <code>ldap-utils</code> and <code>openssl</code>, then copies the schema in. The final image contains no Samba binaries.</p>
+  <div class="code"><div class="file">ldap/Dockerfile (excerpt)</div><pre>FROM debian:bookworm-slim AS schema
+RUN apt-get update \
+ &amp;&amp; cd /tmp &amp;&amp; apt-get download samba \
+ &amp;&amp; dpkg-deb --fsys-tarfile samba_*.deb | tar -x ./usr/share/doc/samba/examples/LDAP/samba.ldif
+...
+COPY --from=schema /tmp/usr/share/doc/samba/examples/LDAP/samba.ldif /etc/ldap/schema/samba.ldif</pre></div>
+
+  <h3>ldap/entrypoint.sh — first start</h3>
+  <p>On every start the script checks for <code>/etc/ldap/slapd.d/cn=config.ldif</code>. If the file is missing, the volumes are empty, so the script builds the directory. Then it runs <code>slapd</code> in the foreground.</p>
+  <figure>
+    <div class="diagram"><pre class="mermaid">
+flowchart TD
+  S(["container start"]) --> C{"cn=config.ldif exists?"}
+  C -- yes --> RUN["exec slapd -h ldap:/// ldapi:/// -d stats"]
+  C -- "no (empty volumes)" --> G["generate config.ldif<br/>schemas, mdb database, rootDN, ACLs"]
+  G --> SA["slapadd -n0 (offline load of cn=config)"]
+  SA --> TMP["start slapd on ldapi:/// only"]
+  TMP --> BASE["ldapadd base tree:<br/>dc, cn=admin, OUs, cn=radius service account"]
+  BASE --> SEED["for each line in seed/users.txt:<br/>add-user.sh"]
+  SEED --> STOP["stop the temporary slapd"]
+  STOP --> RUN
+</pre></div>
+    <figcaption>Figure 3. The temporary slapd listens only on the local socket <code>ldapi:///</code>, so nobody on the network can reach a half-built directory.</figcaption>
+  </figure>
+  <p>The generated <code>cn=config</code> loads five schemas: <code>core</code>, <code>cosine</code>, <code>nis</code>, <code>inetorgperson</code> and <code>samba</code>. It defines one MDB database for <code>dc=nitsrinagar,dc=edu</code>, with indexes on <code>objectClass</code>, <code>uid</code>, <code>member</code> and <code>cn</code>. The admin password is stored only as a <code>{SSHA}</code> hash in <code>olcRootPW</code>.</p>
+
+  <h3>Access control (olcAccess)</h3>
+  <p>LDAP checks rules in order, and the first rule whose target matches decides. <code>ROOT_PEER</code> is the identity of the root user over the local socket; scripts inside the container use it, with no password.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">#</th><th>Target</th><th>Who gets what</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td class="num">{0}</td><td><code>userPassword</code></td><td>root: manage · anonymous: <em>auth</em> only · others: none</td><td>Anyone can bind (log in), nobody can read the hash</td></tr>
+      <tr><td class="num">{1}</td><td><code>sambaNTPassword</code>, <code>sambaLMPassword</code></td><td>root: manage · <code>cn=radius</code>: read · others: none</td><td>Only FreeRADIUS needs the NT hash, for MSCHAPv2</td></tr>
+      <tr><td class="num">{2}</td><td><code>cn=admin</code> entry: <code>entry</code>, <code>objectClass</code>, <code>cn</code></td><td>anonymous: read · others: continue to the next rule</td><td>phpLDAPadmin looks up the login entry before it binds</td></tr>
+      <tr><td class="num">{3}</td><td>everything else</td><td>root: manage · <code>cn=radius</code>: read · self: read · others: none</td><td>Anonymous users cannot list the directory. Users see only their own entry.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Directory tree</h3>
+  <figure>
+    <div class="diagram"><pre class="mermaid">
+flowchart TD
+  B["dc=nitsrinagar,dc=edu"] --> ADM["cn=admin"]
+  B --> ST["ou=Students"]
+  B --> FA["ou=Faculty"]
+  B --> SF["ou=Staff"]
+  B --> GU["ou=Guests"]
+  B --> GR["ou=Groups"]
+  B --> SV["ou=Services"]
+  ST --> u1["uid=student001"]
+  ST --> u2["uid=24IT001"]
+  ST --> u6["uid=disabled001"]
+  FA --> u3["uid=faculty001"]
+  SF --> u4["uid=staff001"]
+  GU --> u5["uid=guest001"]
+  GR --> g1["cn=students"]
+  GR --> g2["cn=faculty"]
+  GR --> g3["cn=staff"]
+  GR --> g4["cn=guests"]
+  GR --> g5["cn=disabled"]
+  SV --> svc["cn=radius<br/>read-only bind account"]
+</pre></div>
+    <figcaption>Figure 4. <code>disabled001</code> is a member of both <code>cn=students</code> and <code>cn=disabled</code>. The tests use it to prove that "disabled" wins.</figcaption>
+  </figure>
+
+  <h3>ldap/add-user.sh — one user, two hashes</h3>
+  <p>Each user entry has two object classes: <code>inetOrgPerson</code> (name, mail, password) and <code>sambaSamAccount</code> (NT hash). The script computes both hashes from one password:</p>
+  <div class="code"><div class="file">ldap/add-user.sh (excerpt)</div><pre>ssha=$(slappasswd -h '{SSHA}' -s "$password")
+nt_hash=$(printf '%s' "$password" | iconv -f UTF-8 -t UTF-16LE \
+    | openssl dgst -md4 -provider default -provider legacy | awk '{print toupper($NF)}')</pre></div>
+  <ul>
+    <li><code>{SSHA}</code> is salted SHA-1. EAP-TTLS/PAP uses it, because FreeRADIUS sends the plain password to LDAP as a bind.</li>
+    <li>The NT hash is MD4 of the UTF-16LE password. MSCHAPv2 is a challenge-response method, so the server must hold this hash. OpenSSL 3 keeps MD4 in its <code>legacy</code> provider. The function was checked against the known vector: NT hash of <code>password</code> = <code>8846F7EAEE8FB117AD06BDD830B7586C</code>.</li>
+    <li><code>sambaSamAccount</code> requires a <code>sambaSID</code>. The script uses a fixed lab domain <code>S-1-5-21-1000-2000-3000</code> plus RID <code>1001 + count of existing accounts</code>.</li>
+    <li>Groups are <code>groupOfNames</code>, which must have at least one member. So the script creates a group when its first member arrives, and modifies it after that.</li>
+    <li>The password comes from <code>$NEW_USER_PASSWORD</code>. If that is empty, the script generates one and prints it once. It is never a command-line argument, so it does not appear in shell history or the process list.</li>
+  </ul>
+</section>
+
+<!-- 8 -->
+<section id="certs">
+  <h2><span class="num">08</span>Certificates</h2>
+  <p class="summary">PEAP and TTLS start with TLS. The device must check that it talks to the real server.</p>
+  <figure>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  CA["NIT Srinagar Lab CA<br/>RSA 3072 · 10 years<br/>CA:TRUE, keyCertSign"] -- signs --> SRV["radius.nitsrinagar.lab<br/>RSA 3072 · 2 years<br/>EKU serverAuth · SAN DNS"]
+  SRV -- "presented in TLS" --> DEV["Device"]
+  CA -- "installed as trusted root<br/>(certs/ca.pem)" --> DEV
+</pre></div>
+    <figcaption>Figure 5. The device trusts the server only if the chain leads to <code>ca.pem</code> and the name matches <code>radius.nitsrinagar.lab</code>.</figcaption>
+  </figure>
+  <p><code>certs/make-certs.sh</code> runs once, inside the FreeRADIUS image, which has <code>openssl</code>. It writes <code>ca.pem</code>, <code>ca.key</code>, <code>server.pem</code> and <code>server.key</code>, with the keys at mode <code>600</code>. It refuses to overwrite an existing <code>server.pem</code>.</p>
+  <p>Why this matters: without a server-certificate check, a fake AP with its own RADIUS server could complete the TLS handshake and collect MSCHAPv2 responses. Test group 3 proves that the client aborts on a name mismatch.</p>
+</section>
+
+<!-- 9 -->
+<section id="radius">
+  <h2><span class="num">09</span>FreeRADIUS container</h2>
+  <p class="summary">The official image, plus seven replaced files and two <code>sed</code> edits.</p>
+
+  <h3>radius/Dockerfile</h3>
+  <ul>
+    <li>Copies the 7 config files over the stock ones.</li>
+    <li>Enables the <code>ldap</code> and <code>sql</code> modules with symlinks in <code>mods-enabled/</code>.</li>
+    <li>Sets <code>auth = yes</code> in <code>radiusd.conf</code>, so every accept and reject is logged with its reason. The password is never logged.</li>
+    <li>Turns on the <code>class</code> column in the stock SQLite queries, with <code>%{string:&amp;Class}</code> so the group name is stored as text, not hex.</li>
+    <li>Starts with <code>-l stdout</code>, so <code>docker compose logs radius</code> shows the server log.</li>
+  </ul>
+
+  <h3>radius/radius-start.sh</h3>
+  <p>The certificates arrive from the Windows folder, where Linux file ownership has no meaning. The script copies them to <code>/etc/freeradius/certs/lab</code> and gives the private key owner <code>root:freerad</code> and mode <code>0640</code>, because FreeRADIUS runs as user <code>freerad</code>. It also creates the <code>sqlite/</code> and <code>radacct/</code> folders. Then it calls the image's normal entrypoint.</p>
+
+  <h3>raddb/clients.conf — who may talk to the server</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Client</th><th>Address</th><th>Secret</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>localhost</code></td><td class="num">127.0.0.1</td><td><code>RADIUS_SECRET_LOCAL</code></td><td>radtest inside the container</td></tr>
+      <tr><td><code>test-runner</code></td><td class="num">10.89.0.50</td><td><code>RADIUS_SECRET_LOCAL</code></td><td>The tests container</td></tr>
+      <tr><td><code>ap-dirx6060</code></td><td class="num">10.89.0.1</td><td><code>RADIUS_SECRET_AP</code></td><td><code>require_message_authenticator = yes</code>, <code>limit_proxy_state = yes</code></td></tr>
+    </tbody>
+  </table></div>
+  <p>Secrets use <code>$ENV{…}</code>, so they come from <code>.env</code> at run time and are never in the image. The AP entry uses the Docker gateway address, not the AP's address. <a href="#nat">Section 16</a> explains why.</p>
+
+  <h3>raddb/mods-available/ldap</h3>
+  <div class="code"><div class="file">radius/raddb/mods-available/ldap (excerpt)</div><pre>identity = "cn=radius,ou=Services,$ENV{LDAP_BASE_DN}"
+password = "$ENV{LDAP_RADIUS_PASSWORD}"
+update {
+	control:NT-Password := 'sambaNTPassword'
+}
+user {
+	filter = "(&amp;(objectClass=inetOrgPerson)(uid=%{%{Stripped-User-Name}:-%{User-Name}}))"
+}
+group {
+	base_dn = "ou=Groups,${..base_dn}"
+	filter = '(objectClass=groupOfNames)'
+	membership_filter = "(member=%{control:LDAP-UserDn})"
+}</pre></div>
+  <ul>
+    <li><strong>Lookup:</strong> binds as the read-only <code>cn=radius</code> account and searches by <code>uid</code>. FreeRADIUS escapes the user name, so LDAP filter injection is not possible.</li>
+    <li><strong>NT hash:</strong> copies <code>sambaNTPassword</code> into <code>control:NT-Password</code> for <code>mschap</code>.</li>
+    <li><strong>Password check for PAP/TTLS:</strong> <code>Auth-Type LDAP</code> binds as the user's DN with the given password. FreeRADIUS never sees the SSHA hash.</li>
+    <li><strong>Groups:</strong> <code>membership_filter</code> searches <code>ou=Groups</code> for groups whose <code>member</code> is the user. This makes the <code>LDAP-Group == "faculty"</code> check work without a <code>memberOf</code> overlay.</li>
+  </ul>
+
+  <h3>raddb/mods-available/eap</h3>
+  <ul>
+    <li><code>default_eap_type = peap</code>. The <code>ttls</code> and <code>peap</code> sub-modules both send the inner request to <code>virtual_server = "inner-tunnel"</code>.</li>
+    <li>Only <code>peap</code>, <code>ttls</code> and <code>mschapv2</code> are loaded. MD5, GTC and LEAP are left out because they are weak.</li>
+    <li>TLS: our lab certificates, <code>tls_min_version = "1.2"</code>, <code>tls_max_version = "1.2"</code> (TLS 1.3 inside PEAP/TTLS is still unreliable on many clients), cipher list <code>HIGH:!aNULL:!MD5:!RC4:!3DES</code>.</li>
+    <li><code>use_tunneled_reply = no</code>. The inner result goes out through <code>session-state</code> instead (see section 10).</li>
+  </ul>
+
+  <h3>raddb/mods-available/sql</h3>
+  <p>The <code>sql</code> module is used only for accounting and the post-auth log. It never looks up users; LDAP is the only identity store. Driver <code>rlm_sql_sqlite</code>, database <code>${logdir}/sqlite/radius.db</code>. The <code>bootstrap</code> option creates the standard schema the first time.</p>
+  <div class="code"><div class="file">radius/raddb/mods-available/sql (excerpt)</div><pre><span class="c"># Log the real (inner) identity, not the anonymous outer identity of PEAP/TTLS</span>
+sql_user_name = "%{%{reply:User-Name}:-%{%{session-state:User-Name}:-%{User-Name}}}"</pre></div>
+  <p>The fallback chain reads: use the reply's User-Name if there is one (an accept), else the inner identity saved in session-state (a reject inside the tunnel), else the request's User-Name (plain PAP and accounting).</p>
+</section>
+
+<!-- 10 -->
+<section id="sites">
+  <h2><span class="num">10</span>Request processing: default and inner-tunnel</h2>
+  <p class="summary">Two virtual servers. The outer one talks to the AP. The inner one sees the real user inside TLS.</p>
+  <figure>
+    <div class="diagram"><pre class="mermaid">
+flowchart TD
+  IN(["Access-Request from NAS"]) --> AZ["default: authorize<br/>filter_username, preprocess"]
+  AZ --> E{"EAP-Message?"}
+  E -- "yes" --> EAP["eap module: TLS rounds<br/>returns Access-Challenge"]
+  E -- "no (radtest PAP)" --> LP["ldap lookup<br/>Auth-Type := LDAP (bind)"]
+  EAP -- "TLS ready, tunneled data" --> IT["inner-tunnel: authorize<br/>mschap, eap, ldap, pap"]
+  IT --> AU{"authenticate"}
+  AU -- "PEAP" --> MS["Auth-Type MS-CHAP<br/>NT hash from LDAP"]
+  AU -- "TTLS" --> LB["Auth-Type LDAP<br/>bind as the user"]
+  MS --> PA["inner post-auth: campus_authorize"]
+  LB --> PA
+  PA -- "accept" --> SS["copy User-Name, Session-Timeout,<br/>Tunnel-*, Class to outer.session-state"]
+  PA -- "reject" --> RJ(["Access-Reject"])
+  SS --> OPA["default post-auth:<br/>reply := session-state values"]
+  LP --> PAP["default post-auth: campus_authorize"]
+  PAP --> OPA
+  OPA --> SQL["sql: row in radpostauth"]
+  SQL --> OUT(["Access-Accept"])
+</pre></div>
+    <figcaption>Figure 6. Plain PAP from <code>radtest</code> runs the policy in the outer server. EAP logins run it in the inner tunnel.</figcaption>
+  </figure>
+
+  <h3>sites-available/default (outer)</h3>
+  <ul>
+    <li><strong>listen:</strong> auth and acct on all addresses. <code>port = 0</code> means the standard ports, 1812 and 1813.</li>
+    <li><strong>authorize:</strong> <code>eap { ok = return }</code> stops early while an EAP conversation is in progress. LDAP is called only when there is no <code>EAP-Message</code>, so the server does not look up "anonymous" on every TLS round.</li>
+    <li><strong>authenticate:</strong> <code>Auth-Type LDAP</code> (bind) for PAP, <code>eap</code> for everything else.</li>
+    <li><strong>preacct / accounting:</strong> <code>acct_unique</code> builds a stable session key. Then the <code>detail</code> and <code>sql</code> modules write the record.</li>
+    <li><strong>post-auth:</strong> copies the six authorization attributes from session-state into the reply with <code>:=</code>, logs to SQL, and removes <code>Reply-Message</code> for EAP. Some clients reject an EAP packet that carries one.</li>
+  </ul>
+  <div class="code"><div class="file">radius/raddb/sites-available/default — post-auth</div><pre>update reply {
+	&amp;User-Name := &amp;session-state:User-Name
+	&amp;Session-Timeout := &amp;session-state:Session-Timeout
+	&amp;Tunnel-Type := &amp;session-state:Tunnel-Type
+	&amp;Tunnel-Medium-Type := &amp;session-state:Tunnel-Medium-Type
+	&amp;Tunnel-Private-Group-Id := &amp;session-state:Tunnel-Private-Group-Id
+	&amp;Class := &amp;session-state:Class
+}</pre></div>
+
+  <h3>sites-available/inner-tunnel</h3>
+  <p>The inner server listens on <code>127.0.0.1:18120</code> for debugging only. Normal traffic reaches it internally from the <code>peap</code> and <code>ttls</code> modules.</p>
+  <div class="code"><div class="file">radius/raddb/sites-available/inner-tunnel — authorize</div><pre>filter_username
+mschap
+eap {
+	ok = return
+}
+ldap
+if ((ok || updated) &amp;&amp; User-Password &amp;&amp; !control:Auth-Type) {
+	update control {
+		&amp;Auth-Type := ldap
+	}
+}
+<span class="c"># Converts the hex NT hash from LDAP to binary, as mschap needs. Auth-Type is already set above.</span>
+pap</pre></div>
+  <ul>
+    <li><code>mschap</code> sets <code>Auth-Type MS-CHAP</code> when MS-CHAP attributes are present (PEAP).</li>
+    <li><code>ldap</code> finds the user and loads the NT hash.</li>
+    <li>When there is a plain <code>User-Password</code> (TTLS/PAP), the <code>if</code> block selects an LDAP bind.</li>
+    <li><code>pap</code> runs last only to convert the 32-character hex NT hash into 16 bytes. Without it, MSCHAPv2 failed; see <a href="#bugs">section 17</a>.</li>
+  </ul>
+  <p>In <strong>post-auth</strong>, the inner server runs <code>campus_authorize</code> and then hands the result to the outer server. This is needed because the outer and inner requests are separate. For PEAP, the final Access-Accept is sent one round later than the inner accept, and <code>session-state</code> survives between rounds through the RADIUS <code>State</code> attribute.</p>
+</section>
+
+<!-- 11 -->
+<section id="policy">
+  <h2><span class="num">11</span>Authorization policy — policy.d/campus</h2>
+  <p class="summary">One unlang policy, <code>campus_authorize</code>, runs after the password is verified.</p>
+  <figure>
+    <div class="diagram"><pre class="mermaid">
+flowchart TD
+  S(["password verified"]) --> D{"member of cn=disabled?"}
+  D -- yes --> R1(["Reject: Account disabled"])
+  D -- no --> F{"faculty?"}
+  F -- yes --> AF["12 h · VLAN 20 · Class faculty"]
+  F -- no --> T{"staff?"}
+  T -- yes --> AT["12 h · VLAN 20 · Class staff"]
+  T -- no --> U{"students?"}
+  U -- yes --> AU["8 h · VLAN 10 · Class students"]
+  U -- no --> G{"guests?"}
+  G -- yes --> AG["2 h · VLAN 30 · Class guests"]
+  G -- no --> R2(["Reject: No Wi-Fi access group"])
+</pre></div>
+    <figcaption>Figure 7. The order matters: "disabled" is checked first, so it overrides every other group.</figcaption>
+  </figure>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Group</th><th>Result</th><th class="num">Session-Timeout</th><th class="num">VLAN</th><th>Class</th></tr></thead>
+    <tbody>
+      <tr><td><code>disabled</code></td><td><span class="pill reject">Reject</span></td><td class="num">—</td><td class="num">—</td><td>—</td></tr>
+      <tr><td><code>faculty</code></td><td><span class="pill accept">Accept</span></td><td class="num">43200</td><td class="num">20</td><td>faculty</td></tr>
+      <tr><td><code>staff</code></td><td><span class="pill accept">Accept</span></td><td class="num">43200</td><td class="num">20</td><td>staff</td></tr>
+      <tr><td><code>students</code></td><td><span class="pill accept">Accept</span></td><td class="num">28800</td><td class="num">10</td><td>students</td></tr>
+      <tr><td><code>guests</code></td><td><span class="pill accept">Accept</span></td><td class="num">7200</td><td class="num">30</td><td>guests</td></tr>
+      <tr><td>no group</td><td><span class="pill reject">Reject</span></td><td class="num">—</td><td class="num">—</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <div class="code"><div class="file">radius/raddb/policy.d/campus (one branch)</div><pre>elsif (LDAP-Group == "students") {
+	update reply {
+		&amp;Session-Timeout := 28800
+		&amp;Tunnel-Type := VLAN
+		&amp;Tunnel-Medium-Type := IEEE-802
+		&amp;Tunnel-Private-Group-Id := "10"
+		&amp;Class := "students"
+		&amp;Reply-Message := "Welcome, student."
+	}
+}</pre></div>
+  <p><code>LDAP-Group</code> is a virtual attribute from the <code>ldap</code> module. Each comparison runs the group search from section 9.</p>
+  <p>The DIR-X6060 is a consumer router, so it will probably ignore the three <code>Tunnel-*</code> attributes. The VLAN part then has no effect. The rejects, <code>Session-Timeout</code> and <code>Class</code> still work.</p>
+</section>
+
+<!-- 12 -->
+<section id="accounting">
+  <h2><span class="num">12</span>Accounting</h2>
+  <p class="summary">Every session is recorded twice: in a queryable database and in plain text.</p>
+  <figure>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant AP as AP
+  participant R as FreeRADIUS
+  participant DB as SQLite radacct
+  participant F as detail file
+  AP->>R: Accounting-Request Start (Acct-Session-Id, User-Name, Class)
+  R->>R: preacct: acct_unique builds Acct-Unique-Session-Id
+  R->>F: append record
+  R->>DB: INSERT row
+  R-->>AP: Accounting-Response
+  AP->>R: Interim-Update (time, bytes so far)
+  R->>DB: UPDATE row
+  AP->>R: Stop (final time, bytes, terminate cause)
+  R->>DB: UPDATE row, set acctstoptime
+</pre></div>
+    <figcaption>Figure 8. The AP must get an Accounting-Response. If it does not, it re-sends the packet.</figcaption>
+  </figure>
+  <ul>
+    <li><strong>SQLite</strong>: <code>/var/log/freeradius/sqlite/radius.db</code> in volume <code>radius-acct</code>. Table <code>radacct</code> holds sessions; table <code>radpostauth</code> holds every accept and reject, with the real user name and the group.</li>
+    <li><strong>Detail files</strong>: <code>radacct/&lt;source-ip&gt;/detail-YYYYMMDD</code>, one text record per packet.</li>
+    <li><strong>Why SQLite</strong>: no extra database server, which keeps the "no PostgreSQL" decision. A later Spring Boot dashboard can still read it with SQL.</li>
+  </ul>
+  <p><code>scripts/acct.ps1</code> shows the last 20 sessions. It opens the database with <code>?immutable=1</code> from the tests image, so it can never change the data.</p>
+</section>
+
+<!-- 13 -->
+<section id="pla">
+  <h2><span class="num">13</span>phpLDAPadmin</h2>
+  <p class="summary">A web UI for the directory, reachable only from this PC at <code>127.0.0.1:8080</code>.</p>
+  <p>Version 2 is a full rewrite by the project's own maintainer (<code>leenooks</code>); v1.2 is deprecated for security reasons. Getting the admin login to work needed three settings, found one at a time:</p>
+  <ol class="steps">
+    <li><code>LDAP_LOGIN_ATTR: DN</code> — log in with a full DN. It must be uppercase.</li>
+    <li>A real entry at <code>cn=admin,dc=nitsrinagar,dc=edu</code>. phpLDAPadmin refuses a rootDN that has no entry. The bind still checks <code>olcRootPW</code>.</li>
+    <li>ACL rule {2}: phpLDAPadmin looks up the entry anonymously before it binds, so anonymous users may read that one entry's <code>objectClass</code> and <code>cn</code>.</li>
+  </ol>
+  <p><code>LDAP_LOGIN_OBJECTCLASS: organizationalRole</code> adds a safety rule. Only the admin entry has that class, so Wi-Fi users (<code>inetOrgPerson</code>) cannot log in to the admin UI. This was tested: admin gets in, <code>student001</code> is refused.</p>
+</section>
+
+<!-- 14 -->
+<section id="tests">
+  <h2><span class="num">14</span>Test suite — tests/run-tests.sh</h2>
+  <p class="summary">28 checks, run with a real 802.1X client. No Wi-Fi hardware is needed.</p>
+  <p>The tests image is Debian with <code>eapoltest</code> (the <code>eapol_test</code> program from wpa_supplicant), <code>freeradius-utils</code> (<code>radclient</code>) and <code>sqlite3</code>. <code>eapol_test</code> plays the device <em>and</em> the AP. It does the complete EAP exchange and sends RADIUS straight to <code>10.89.0.20</code>.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">Group</th><th>What it proves</th><th class="num">Checks</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>5 users × PEAP and TTLS: Accept with the right Session-Timeout, VLAN, Class and real User-Name</td><td class="num">10</td></tr>
+      <tr><td class="num">2</td><td>Wrong password, unknown user and disabled001 are rejected, for both methods</td><td class="num">6</td></tr>
+      <tr><td class="num">3</td><td>The client aborts when the server name is wrong, and the reason is a name mismatch</td><td class="num">2</td></tr>
+      <tr><td class="num">4</td><td>Plain PAP via LDAP bind works and rejects; a wrong shared secret gets no reply</td><td class="num">3</td></tr>
+      <tr><td class="num">5</td><td>Accounting Start, Interim and Stop are answered; the SQLite row and the detail file are correct</td><td class="num">5</td></tr>
+      <tr><td class="num">6</td><td><code>radpostauth</code> logs the real identity for an accept and a reject</td><td class="num">2</td></tr>
+    </tbody>
+  </table></div>
+  <h4>How the assertions read attributes</h4>
+  <div class="code"><div class="file">tests/run-tests.sh (excerpt)</div><pre><span class="c"># Last value of RADIUS attribute number $1 in eapol_test output $2 (the Access-Accept is the last packet)</span>
+attr() { awk -v n="$1" '$1=="Attribute" &amp;&amp; $2==n {getline; v=$2} END {print v}' "$2" | tr -d "'"; }
+hex2str() { [ -n "$1" ] &amp;&amp; printf '%b' "$(echo "$1" | sed 's/../\\x&amp;/g')"; }</pre></div>
+  <p><code>eapol_test</code> prints each attribute by number, with its value on the next line. Octet values such as VLAN <code>"20"</code> appear as hex <code>3230</code>, so <code>hex2str</code> decodes them. One test line then compares a single string: <code>SUCCESS 43200 20 faculty faculty001</code>.</p>
+</section>
+
+<!-- 15 -->
+<section id="scripts">
+  <h2><span class="num">15</span>PowerShell scripts</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Script</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>scripts/init.ps1</code></td><td>Creates <code>.env</code> from <code>.env.example</code>, with random secrets from <code>RandomNumberGenerator</code>. It uses an alphabet without look-alike characters and writes UTF-8 without BOM, so Docker Compose parses it. It then runs <code>make-certs.sh</code>. Running it again keeps the existing <code>.env</code> and certificates.</td></tr>
+      <tr><td><code>scripts/test.ps1</code></td><td>Builds the tests image and runs the suite. The exit code is non-zero if any check fails.</td></tr>
+      <tr><td><code>scripts/acct.ps1</code></td><td>Read-only reports: the last 20 sessions, <code>-Auth</code> for login attempts, or <code>-Query</code> for your own SQL.</td></tr>
+    </tbody>
+  </table></div>
+  <p><code>.gitattributes</code> forces LF line endings for <code>*.sh</code>, <code>Dockerfile</code> and <code>radius/raddb/**</code>. With CRLF from Windows, the shell scripts would fail inside Linux containers.</p>
+</section>
+
+<!-- 16 -->
+<section id="nat">
+  <h2><span class="num">16</span>The Docker NAT problem</h2>
+  <p class="summary">FreeRADIUS never sees the AP's real IP address on Docker Desktop for Windows.</p>
+  <figure>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  AP["AP<br/>source 192.168.0.1"] -- "UDP 1812" --> WIN["Windows PC<br/>172.17.28.91:1812"]
+  WIN --> PROXY["Docker Desktop<br/>port forwarder"]
+  PROXY -- "source rewritten<br/>to 10.89.0.1" --> R["FreeRADIUS<br/>10.89.0.20"]
+</pre></div>
+    <figcaption>Figure 9. Measured: a test packet sent to the LAN IP was logged as "unknown client 10.89.0.1".</figcaption>
+  </figure>
+  <p>RADIUS identifies each NAS by its source IP address, then checks the shared secret. Because every LAN packet arrives from <code>10.89.0.1</code>, the AP entry in <code>clients.conf</code> uses that address. So the shared secret is the only proof that a packet comes from the AP. That is why <code>RADIUS_SECRET_AP</code> is 32 random characters.</p>
+  <p>A check on <code>NAS-IP-Address</code> was considered and rejected. Anyone who has the secret can forge that attribute, and consumer routers sometimes fill it with an unexpected address. On a Linux host with host networking, you can change <code>ipaddr</code> back to <code>$ENV{AP_IP}</code>.</p>
+  <p>The path was verified: a container outside the lab network sent a full PEAP login through the published port with the AP secret. The server log showed <code>Login OK: [student001] (from client ap-dirx6060 …)</code>.</p>
+</section>
+
+<!-- 17 -->
+<section id="bugs">
+  <h2><span class="num">17</span>Bugs found and fixed</h2>
+  <p class="summary">Each one was found by a failing test or a debug trace, not by guessing.</p>
+  <div class="callout bug"><p><strong>PEAP failed: "No NT-Password".</strong> The debug trace showed that LDAP did return the hash, as a 32-character hex string, but <code>mschap</code> needs 16 raw bytes. The stock inner-tunnel calls <code>pap</code> at the end of authorize, which converts it. Fix: add <code>pap</code> after the LDAP block.</p></div>
+  <div class="callout bug"><p><strong>Accept logged as "anonymous", with two User-Names.</strong> The outer reply already contained <code>User-Name = "anonymous"</code>, and the stock-style <code>&amp;reply: += &amp;session-state:</code> added a second one. The AP would see two identities. Fix: copy only the six policy attributes, with <code>:=</code>. This also stopped internal TLS attributes from leaking into the reply.</p></div>
+  <div class="callout bug"><p><strong>Class stored as hex.</strong> <code>Class</code> is an octets attribute, so SQLite stored <code>0x73747564656e7473</code>. Fix: write it with <code>%{string:&amp;Class}</code>.</p></div>
+  <div class="callout bug"><p><strong>AP would be "unknown client".</strong> Docker Desktop's NAT, described in section 16. Fix: match the gateway address.</p></div>
+  <div class="callout bug"><p><strong>phpLDAPadmin admin login refused.</strong> Three separate causes, described in section 13.</p></div>
+</section>
+
+<!-- 18 -->
+<section id="security">
+  <h2><span class="num">18</span>Security model</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Threat</th><th>Control in this lab</th></tr></thead>
+    <tbody>
+      <tr><td>Fake AP collects passwords</td><td>Private CA + server-name check (<code>radius.nitsrinagar.lab</code>); tested in group 3</td></tr>
+      <tr><td>Password sniffed over the air</td><td>The inner method runs only inside TLS 1.2; the outer identity is <code>anonymous</code></td></tr>
+      <tr><td>Forged RADIUS packets (BlastRADIUS, CVE-2024-3596)</td><td><code>require_message_authenticator = yes</code> and <code>limit_proxy_state = yes</code> for the AP</td></tr>
+      <tr><td>Rogue NAS</td><td>Per-client shared secrets, 32 random characters; a wrong secret is dropped (tested)</td></tr>
+      <tr><td>Hash theft from LDAP</td><td>ACLs: nobody reads <code>userPassword</code>; only <code>cn=radius</code> reads the NT hash; anonymous users list nothing</td></tr>
+      <tr><td>LDAP filter injection via user name</td><td>The ldap module escapes values inserted into filters</td></tr>
+      <tr><td>Admin UI exposed</td><td>Bound to <code>127.0.0.1</code>; only the <code>organizationalRole</code> admin can log in</td></tr>
+      <tr><td>Secrets in git</td><td><code>.env</code> and <code>certs/*</code> ignored; checked with <code>git check-ignore</code> before the commit</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout"><p><strong>Known weakness.</strong> The NT hash is unsalted MD4. PEAP-MSCHAPv2 cannot work without it. Users who connect only with EAP-TTLS/PAP would not need it.</p></div>
+</section>
+
+<!-- 19 -->
+<section id="next">
+  <h2><span class="num">19</span>Next: the real AP</h2>
+  <p class="summary">The server is ready. The open question is the hardware.</p>
+  <ol class="steps">
+    <li>In the DIR-X6060 web UI, open Settings → Wireless → Security Mode. Look for a WPA2-Enterprise option.</li>
+    <li>If it is there: connect this PC to the D-Link network, give the PC a fixed IP, and add the firewall rule for UDP 1812–1813 (README §6.2).</li>
+    <li>In the router, set the RADIUS server to the PC's IP, port 1812, secret <code>RADIUS_SECRET_AP</code>. If there is an accounting field, set port 1813.</li>
+    <li>On a phone, install <code>ca.pem</code>, choose PEAP / MSCHAPv2, set the domain <code>radius.nitsrinagar.lab</code>, and log in as <code>student001</code>.</li>
+    <li>Watch <code>docker compose logs -f radius</code> for <code>Login OK</code>, then run <code>.\scripts\acct.ps1</code>.</li>
+  </ol>
+  <p>If the router has no Enterprise mode, use a D-Link DAP business AP or an OpenWrt device. The server side does not change.</p>
+</section>
+
+<!-- 20 -->
+<section id="glossary">
+  <h2><span class="num">20</span>Glossary</h2>
+  <div class="table-wrap"><table>
+    <tbody>
+      <tr><td><strong>Supplicant</strong></td><td>The device that wants access (laptop, phone)</td></tr>
+      <tr><td><strong>Authenticator / NAS</strong></td><td>The AP. 802.1X calls it the authenticator; RADIUS calls it the Network Access Server.</td></tr>
+      <tr><td><strong>EAP / EAPOL</strong></td><td>The authentication framework, and its transport between device and AP</td></tr>
+      <tr><td><strong>PEAP</strong></td><td>EAP method: a TLS tunnel, then EAP-MSCHAPv2 inside it</td></tr>
+      <tr><td><strong>EAP-TTLS/PAP</strong></td><td>EAP method: a TLS tunnel, then a plain password inside it</td></tr>
+      <tr><td><strong>Virtual server</strong></td><td>A named FreeRADIUS processing pipeline (<code>default</code>, <code>inner-tunnel</code>)</td></tr>
+      <tr><td><strong>unlang</strong></td><td>FreeRADIUS's policy language (<code>if</code>, <code>update</code>, <code>reject</code>)</td></tr>
+      <tr><td><strong>session-state</strong></td><td>Attributes FreeRADIUS keeps between the rounds of one EAP conversation</td></tr>
+      <tr><td><strong>DN</strong></td><td>Distinguished Name, the full path of an LDAP entry</td></tr>
+      <tr><td><strong>rootDN</strong></td><td>The LDAP superuser (<code>cn=admin,…</code>), which bypasses ACLs</td></tr>
+      <tr><td><strong>SSHA / NT hash</strong></td><td>Salted SHA-1 for LDAP binds; MD4 of UTF-16LE for MSCHAPv2</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<footer>Campus Wi-Fi AAA Lab · Networking Project · built and verified 4 October 2026 · source in <code>aaa-server/</code>, see README.md for commands.</footer>
+</main>
+</div>
+<!-- Standalone copy: renders the Mermaid diagrams when the file is opened directly in a browser -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'neutral'
+  });
+</script>
+</body>
+</html>

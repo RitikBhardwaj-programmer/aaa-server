@@ -211,3 +211,4 @@ docker compose up -d --build
 | `certs/make-certs.sh` | Lab CA and server certificate |
 | `tests/run-tests.sh` | End-to-end tests |
 | `scripts/` | `init.ps1`, `test.ps1`, `acct.ps1` |
+| `docs/aaa-lab-guide.html` | Illustrated explainer of the whole lab, with every component and diagram. Open it in a browser. |
