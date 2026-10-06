@@ -38,19 +38,20 @@ EOF
     tail -1 "$work/out"
 }
 
-echo "== 1. Authentication + authorization over EAP (user, group -> Session-Timeout / VLAN)"
-while read -r user timeout vlan group; do
+echo "== 1. Authentication + authorization over EAP (user, group -> VLAN / Class, re-check every ${REAUTH_INTERVAL}s)"
+# Attribute 29 = Termination-Action; value 1 = RADIUS-Request (re-authenticate, do not disconnect)
+while read -r user vlan group; do
     for method in PEAP TTLS; do
         result=$(eap_login "$method" "$user" "$PW")
-        got="$result $(attr 27 "$work/out") $(hex2str "$(attr 81 "$work/out")") $(hex2str "$(attr 25 "$work/out")") $(attr 1 "$work/out")"
-        check "$method $user -> Accept, ${timeout}s, VLAN $vlan, Class $group" "$got" "SUCCESS $timeout $vlan $group $user"
+        got="$result $(attr 27 "$work/out") $(attr 29 "$work/out") $(hex2str "$(attr 81 "$work/out")") $(hex2str "$(attr 25 "$work/out")") $(attr 1 "$work/out")"
+        check "$method $user -> Accept, re-check ${REAUTH_INTERVAL}s, VLAN $vlan, Class $group" "$got" "SUCCESS $REAUTH_INTERVAL 1 $vlan $group $user"
     done
 done <<EOF
-student001 28800 10 students
-24IT001 28800 10 students
-faculty001 43200 20 faculty
-staff001 43200 20 staff
-guest001 7200 30 guests
+student001 10 students
+24IT001 10 students
+faculty001 20 faculty
+staff001 20 staff
+guest001 30 guests
 EOF
 
 echo "== 2. Rejections"
@@ -101,6 +102,27 @@ row=$(sqlite3 "$DB" "SELECT reply FROM radpostauth WHERE username = 'faculty001'
 check "radpostauth has faculty001 Access-Accept" "$row" "Access-Accept"
 row=$(sqlite3 "$DB" "SELECT reply FROM radpostauth WHERE username = 'disabled001' ORDER BY id DESC LIMIT 1;")
 check "radpostauth has disabled001 Access-Reject" "$row" "Access-Reject"
+
+echo "== 7. Disconnect-Request for open sessions (disconnect-user.sh)"
+# An open session whose NAS is this container: nothing listens on 3799 here, so "no reply" is expected.
+# This proves the session lookup and the request; an RFC 5176-capable AP would answer with an ACK.
+session="dm-$(date +%s)-$$"
+cat <<EOF | radclient -r 1 -t 3 "$RADIUS:1813" acct "$SECRET" > /dev/null 2>&1
+User-Name = "guest001", Acct-Status-Type = Start, Acct-Session-Id = "$session",
+NAS-IP-Address = 10.89.0.50, Calling-Station-Id = "02-00-00-00-00-02"
+EOF
+sleep 1
+out=$(RADIUS_SECRET_AP=$SECRET AP_IP=unused disconnect-user.sh guest001)
+if echo "$out" | grep -q "02-00-00-00-00-02 on 10.89.0.50: no reply"; then
+    ok "open session found and Disconnect-Request sent to its NAS"
+else
+    bad "open session found and Disconnect-Request sent to its NAS (got: $out)"
+fi
+cat <<EOF | radclient -r 1 -t 3 "$RADIUS:1813" acct "$SECRET" > /dev/null 2>&1
+User-Name = "guest001", Acct-Status-Type = Stop, Acct-Session-Id = "$session",
+NAS-IP-Address = 10.89.0.50, Calling-Station-Id = "02-00-00-00-00-02", Acct-Session-Time = 1
+EOF
+check "user without open sessions -> nothing sent" "$(RADIUS_SECRET_AP=$SECRET AP_IP=unused disconnect-user.sh faculty001)" "No open sessions for faculty001."
 
 rm -rf "$work"
 echo

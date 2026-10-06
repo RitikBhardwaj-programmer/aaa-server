@@ -36,6 +36,7 @@ services:
       RADIUS_SECRET_LOCAL: ${RADIUS_SECRET_LOCAL}
       RADIUS_SECRET_AP: ${RADIUS_SECRET_AP}
       AP_IP: ${AP_IP}
+      REAUTH_INTERVAL: ${REAUTH_INTERVAL}
       TZ: ${TZ}
     ports:
       - "1812:1812/udp"   # authentication
@@ -80,12 +81,26 @@ services:
       LDAP_BASE_DN: ${LDAP_BASE_DN}
       TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
       RADIUS_SECRET_LOCAL: ${RADIUS_SECRET_LOCAL}
+      REAUTH_INTERVAL: ${REAUTH_INTERVAL}
     volumes:
       - ./certs/ca.pem:/certs/ca.pem:ro
       - radius-acct:/radius-acct:ro
     networks:
       aaa:
         ipv4_address: 10.89.0.50
+
+  # Admin tools (same image as tests): sends Disconnect-Requests to access points
+  tools:
+    build: ./tests
+    profiles: ["tools"]
+    entrypoint: []
+    environment:
+      RADIUS_SECRET_AP: ${RADIUS_SECRET_AP}
+      AP_IP: ${AP_IP}
+    volumes:
+      - radius-acct:/radius-acct:ro
+    networks:
+      - aaa
 
 networks:
   aaa:

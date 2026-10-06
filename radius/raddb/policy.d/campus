@@ -1,13 +1,18 @@
 # Campus authorization policy (the second "A" of AAA).
-# Runs after the password is verified. The LDAP group decides the session limits and the VLAN.
+# Runs after the password is verified. The LDAP group decides the VLAN and the Class.
 #
-#   group      Session-Timeout   VLAN
-#   faculty    12 h              20
-#   staff      12 h              20
-#   students    8 h              10
-#   guests      2 h              30
+#   group      VLAN
+#   faculty    20
+#   staff      20
+#   students   10
+#   guests     30
 #   disabled   -> Access-Reject (checked first, so it overrides every other group)
 #   no group   -> Access-Reject
+#
+# Session-Timeout + Termination-Action = RADIUS-Request make the AP re-check every user
+# every REAUTH_INTERVAL seconds (.env) WITHOUT disconnecting them. A user disabled in LDAP
+# fails the next re-check, so access ends within REAUTH_INTERVAL even on APs that ignore
+# RADIUS Disconnect-Requests (scripts/disable-user.ps1 sends those for instant cut-off).
 #
 # Class carries the group name; the AP echoes it in every accounting packet,
 # so accounting records show which group each session belongs to.
@@ -20,7 +25,8 @@ campus_authorize {
 	}
 	elsif (LDAP-Group == "faculty") {
 		update reply {
-			&Session-Timeout := 43200
+			&Session-Timeout := $ENV{REAUTH_INTERVAL}
+			&Termination-Action := RADIUS-Request
 			&Tunnel-Type := VLAN
 			&Tunnel-Medium-Type := IEEE-802
 			&Tunnel-Private-Group-Id := "20"
@@ -30,7 +36,8 @@ campus_authorize {
 	}
 	elsif (LDAP-Group == "staff") {
 		update reply {
-			&Session-Timeout := 43200
+			&Session-Timeout := $ENV{REAUTH_INTERVAL}
+			&Termination-Action := RADIUS-Request
 			&Tunnel-Type := VLAN
 			&Tunnel-Medium-Type := IEEE-802
 			&Tunnel-Private-Group-Id := "20"
@@ -40,7 +47,8 @@ campus_authorize {
 	}
 	elsif (LDAP-Group == "students") {
 		update reply {
-			&Session-Timeout := 28800
+			&Session-Timeout := $ENV{REAUTH_INTERVAL}
+			&Termination-Action := RADIUS-Request
 			&Tunnel-Type := VLAN
 			&Tunnel-Medium-Type := IEEE-802
 			&Tunnel-Private-Group-Id := "10"
@@ -50,7 +58,8 @@ campus_authorize {
 	}
 	elsif (LDAP-Group == "guests") {
 		update reply {
-			&Session-Timeout := 7200
+			&Session-Timeout := $ENV{REAUTH_INTERVAL}
+			&Termination-Action := RADIUS-Request
 			&Tunnel-Type := VLAN
 			&Tunnel-Medium-Type := IEEE-802
 			&Tunnel-Private-Group-Id := "30"

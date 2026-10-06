@@ -43,7 +43,7 @@ session {
 }
 
 post-auth {
-	# Authorization: LDAP group -> reject, or session limits + VLAN (policy.d/campus)
+	# Authorization: LDAP group -> reject, or re-check interval + VLAN (policy.d/campus)
 	campus_authorize
 
 	# Hand the result to the outer server, which puts it in the final Access-Accept.
@@ -51,6 +51,7 @@ post-auth {
 	update outer.session-state {
 		&User-Name := &request:User-Name
 		&Session-Timeout := &reply:Session-Timeout
+		&Termination-Action := &reply:Termination-Action
 		&Tunnel-Type := &reply:Tunnel-Type
 		&Tunnel-Medium-Type := &reply:Tunnel-Medium-Type
 		&Tunnel-Private-Group-Id := &reply:Tunnel-Private-Group-Id

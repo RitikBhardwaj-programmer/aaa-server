@@ -77,6 +77,7 @@ post-auth {
 	update reply {
 		&User-Name := &session-state:User-Name
 		&Session-Timeout := &session-state:Session-Timeout
+		&Termination-Action := &session-state:Termination-Action
 		&Tunnel-Type := &session-state:Tunnel-Type
 		&Tunnel-Medium-Type := &session-state:Tunnel-Medium-Type
 		&Tunnel-Private-Group-Id := &session-state:Tunnel-Private-Group-Id

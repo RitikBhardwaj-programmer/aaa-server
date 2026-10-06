@@ -26,7 +26,7 @@ You need Docker Desktop (running) and PowerShell.
 cd "C:\Users\DELL\Networking Project\aaa-server"
 .\scripts\init.ps1            # creates .env (random secrets) and the lab certificates
 docker compose up -d --build  # starts ldap, radius, ldapadmin
-.\scripts\test.ps1            # runs the 28 end-to-end tests
+.\scripts\test.ps1            # runs the 30 end-to-end tests
 ```
 
 All secrets are in `.env`. Git ignores `.env` and the `certs/` folder. Never share or commit them.
@@ -63,14 +63,18 @@ Each user has two password hashes:
 
 The policy is in `radius/raddb/policy.d/campus`.
 
-| LDAP group | Result | Session-Timeout | VLAN (`Tunnel-Private-Group-Id`) | `Class` |
-|---|---|---|---|---|
-| `disabled` | **Reject** (wins over every other group) | — | — | — |
-| `faculty` | Accept | 12 h | 20 | `faculty` |
-| `staff` | Accept | 12 h | 20 | `staff` |
-| `students` | Accept | 8 h | 10 | `students` |
-| `guests` | Accept | 2 h | 30 | `guests` |
-| no group | **Reject** | — | — | — |
+| LDAP group | Result | VLAN (`Tunnel-Private-Group-Id`) | `Class` |
+|---|---|---|---|
+| `disabled` | **Reject** (wins over every other group) | — | — |
+| `faculty` | Accept | 20 | `faculty` |
+| `staff` | Accept | 20 | `staff` |
+| `students` | Accept | 10 | `students` |
+| `guests` | Accept | 30 | `guests` |
+| no group | **Reject** | — | — |
+
+Every Accept also carries `Session-Timeout = REAUTH_INTERVAL` (from `.env`, lab default 300 s) and `Termination-Action = RADIUS-Request`.
+The AP then re-checks each connected user at that interval **without disconnecting them**.
+A user disabled in LDAP fails the next re-check, so access ends within `REAUTH_INTERVAL` even on APs that ignore Disconnect-Requests (see section 4).
 
 The AP sends `Class` back in every accounting packet, so accounting records show the group.
 The AP applies the VLAN only if it supports dynamic VLAN assignment. Consumer routers such as the DIR-X6060 usually do not. Then the VLAN attribute is ignored, but the other rules still apply.
@@ -83,16 +87,24 @@ The AP applies the VLAN only if it supports dynamic VLAN assignment. Consumer ro
 docker compose exec ldap add-user.sh 24IT002 "IT Student 24IT002" Students students
 ```
 
-**Disable a user:** add the user to `cn=disabled,ou=Groups`. To enable the user again, remove them from the group.
+**Disable a user** (blocks all new logins and re-checks, then disconnects open sessions):
 
 ```powershell
-@"
-dn: cn=disabled,ou=Groups,dc=nitsrinagar,dc=edu
-changetype: modify
-add: member
-member: uid=24IT002,ou=Students,dc=nitsrinagar,dc=edu
-"@ | docker compose exec -T ldap ldapmodify -Q -Y EXTERNAL -H ldapi:///
+.\scripts\disable-user.ps1 24IT002
 ```
+
+It does two things:
+1. It adds the user to `cn=disabled,ou=Groups`.
+2. It sends an RFC 5176 **Disconnect-Request** to the AP of each open session found in `radacct`. An AP that supports it drops the device at once.
+   The DAP-X3060 (firmware v1.01) does not answer it, so there the device is dropped at the next re-check, within `REAUTH_INTERVAL`.
+
+**Enable the user again:**
+
+```powershell
+.\scripts\enable-user.ps1 24IT002
+```
+
+On Docker Desktop every AP appears as `10.89.0.1`. So the disconnect goes to `AP_IP` from `.env`. Keep `AP_IP` equal to the AP's current address.
 
 **Web UI:** open http://127.0.0.1:8080. Log in with DN `cn=admin,dc=nitsrinagar,dc=edu` and the password `LDAP_ADMIN_PASSWORD` from `.env`.
 Only the admin entry can log in. Wi-Fi users cannot.
@@ -206,9 +218,11 @@ docker compose up -d --build
 | `docker-compose.yml` | Services, fixed network `10.89.0.0/24` (does not collide with the 172.17.x campus LAN) |
 | `ldap/entrypoint.sh` | First-start build: config, ACLs, base entries, seed users |
 | `ldap/add-user.sh` | Creates a user with both password hashes and group membership |
+| `ldap/set-disabled.sh` | Adds a user to, or removes a user from, `cn=disabled` |
+| `tests/disconnect-user.sh` | Sends Disconnect-Requests for a user's open sessions (run through the `tools` service) |
 | `ldap/seed/users.txt` | Test users |
 | `radius/raddb/` | Only the FreeRADIUS files that differ from stock: `clients.conf`, `mods-available/{ldap,eap,sql}`, `sites-available/{default,inner-tunnel}`, `policy.d/campus` |
 | `certs/make-certs.sh` | Lab CA and server certificate |
 | `tests/run-tests.sh` | End-to-end tests |
-| `scripts/` | `init.ps1`, `test.ps1`, `acct.ps1` |
+| `scripts/` | `init.ps1`, `test.ps1`, `acct.ps1`, `disable-user.ps1`, `enable-user.ps1` |
 | `docs/aaa-lab-guide.html` | Illustrated explainer of the whole lab, with every component and diagram. Open it in a browser. |

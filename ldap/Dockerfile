@@ -10,9 +10,9 @@ RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends slapd ldap-utils openssl \
  && rm -rf /var/lib/apt/lists/* /etc/ldap/slapd.d/* /var/lib/ldap/*
 COPY --from=schema /tmp/usr/share/doc/samba/examples/LDAP/samba.ldif /etc/ldap/schema/samba.ldif
-COPY entrypoint.sh add-user.sh /usr/local/bin/
+COPY entrypoint.sh add-user.sh set-disabled.sh /usr/local/bin/
 COPY seed/ /seed/
-RUN chmod 755 /usr/local/bin/entrypoint.sh /usr/local/bin/add-user.sh
+RUN chmod 755 /usr/local/bin/entrypoint.sh /usr/local/bin/add-user.sh /usr/local/bin/set-disabled.sh
 EXPOSE 389
 HEALTHCHECK --interval=10s --timeout=5s --retries=12 \
   CMD ldapsearch -x -H ldap://localhost -b "" -s base namingContexts >/dev/null || exit 1
