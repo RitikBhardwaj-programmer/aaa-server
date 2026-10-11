@@ -13,9 +13,65 @@ DC=$(echo "$BASE" | sed 's/^dc=\([^,]*\).*/\1/')
 mkdir -p /run/slapd
 chown openldap:openldap /run/slapd
 
+hash_pw() { slappasswd -o module-load="$ARGON2_MODULE" -h '{ARGON2}' -s "$1"; }
+
+# slapd on the local socket only, for setup steps before the real start
+start_local() {
+    slapd -h ldapi:/// -u openldap -g openldap -F "$CONF"
+    i=0
+    until ldapsearch -Q -Y EXTERNAL -H ldapi:/// -b "" -s base >/dev/null 2>&1; do
+        i=$((i + 1)); [ $i -gt 30 ] && { echo "slapd did not start" >&2; exit 1; }
+        sleep 1
+    done
+}
+stop_local() {
+    kill "$(cat /run/slapd/slapd.pid)"
+    while [ -f /run/slapd/slapd.pid ]; do sleep 1; done
+}
+
+# Who may do what with userPassword: root manages, a user may change their own (self-service
+# password change, RFC 3062 Password Modify), anyone may use it to log in (bind), nobody reads it.
+PW_ACL="to attrs=userPassword by dn.exact=$ROOT_PEER manage by self =wx by anonymous auth by * none"
+
+# Upgrades for a directory made by an older version of this script (each step runs once)
+if [ -f "$CONF/cn=config.ldif" ]; then
+    current=$(slapcat -n0 -F "$CONF" -o ldif-wrap=no 2>/dev/null)
+    if ! echo "$current" | grep -q '^olcModuleLoad: {[0-9]*}argon2'; then
+        # Existing {SSHA} passwords keep working and become {ARGON2} at the next password change
+        echo "Upgrade: enabling {ARGON2} password hashing"
+        start_local
+        ldapmodify -Q -Y EXTERNAL -H ldapi:/// >/dev/null <<EOF
+dn: cn=module{0},cn=config
+changetype: modify
+add: olcModuleLoad
+olcModuleLoad: $ARGON2_MODULE
+
+dn: olcDatabase={-1}frontend,cn=config
+changetype: modify
+replace: olcPasswordHash
+olcPasswordHash: {ARGON2}
+EOF
+        stop_local
+    fi
+    if ! echo "$current" | grep -q '^olcAccess: {0}to attrs=userPassword .*by self =wx'; then
+        echo "Upgrade: letting users change their own password"
+        start_local
+        ldapmodify -Q -Y EXTERNAL -H ldapi:/// >/dev/null <<EOF
+dn: olcDatabase={1}mdb,cn=config
+changetype: modify
+delete: olcAccess
+olcAccess: {0}
+-
+add: olcAccess
+olcAccess: {0}$PW_ACL
+EOF
+        stop_local
+    fi
+fi
+
 if [ ! -f "$CONF/cn=config.ldif" ]; then
     echo "First start: creating directory $BASE"
-    admin_hash=$(slappasswd -h '{SSHA}' -s "$LDAP_ADMIN_PASSWORD")
+    admin_hash=$(hash_pw "$LDAP_ADMIN_PASSWORD")
     cat > /tmp/config.ldif <<EOF
 dn: cn=config
 objectClass: olcGlobal
@@ -28,6 +84,7 @@ objectClass: olcModuleList
 cn: module{0}
 olcModulePath: /usr/lib/ldap
 olcModuleLoad: back_mdb
+olcModuleLoad: $ARGON2_MODULE
 
 dn: cn=schema,cn=config
 objectClass: olcSchemaConfig
@@ -44,6 +101,7 @@ objectClass: olcDatabaseConfig
 objectClass: olcFrontendConfig
 olcDatabase: {-1}frontend
 olcSizeLimit: 500
+olcPasswordHash: {ARGON2}
 
 dn: olcDatabase={0}config,cn=config
 objectClass: olcDatabaseConfig
@@ -63,7 +121,7 @@ olcDbIndex: objectClass eq
 olcDbIndex: uid eq
 olcDbIndex: member eq
 olcDbIndex: cn eq
-olcAccess: {0}to attrs=userPassword by dn.exact=$ROOT_PEER manage by anonymous auth by * none
+olcAccess: {0}$PW_ACL
 olcAccess: {1}to attrs=sambaNTPassword,sambaLMPassword by dn.exact=$ROOT_PEER manage by dn.exact=$RADIUS_DN read by * none
 olcAccess: {2}to dn.exact="cn=admin,$BASE" attrs=entry,objectClass,cn by anonymous read by * break
 olcAccess: {3}to * by dn.exact=$ROOT_PEER manage by dn.exact=$RADIUS_DN read by self read by * none
@@ -72,14 +130,9 @@ EOF
     rm -f /tmp/config.ldif
     chown -R openldap:openldap "$CONF" "$DATA"
 
-    slapd -h ldapi:/// -u openldap -g openldap -F "$CONF"
-    i=0
-    until ldapsearch -Q -Y EXTERNAL -H ldapi:/// -b "" -s base >/dev/null 2>&1; do
-        i=$((i + 1)); [ $i -gt 30 ] && { echo "slapd did not start" >&2; exit 1; }
-        sleep 1
-    done
+    start_local
 
-    radius_hash=$(slappasswd -h '{SSHA}' -s "$LDAP_RADIUS_PASSWORD")
+    radius_hash=$(hash_pw "$LDAP_RADIUS_PASSWORD")
     ldapadd -Q -Y EXTERNAL -H ldapi:/// >/dev/null <<EOF
 dn: $BASE
 objectClass: dcObject
@@ -129,8 +182,7 @@ EOF
         NEW_USER_PASSWORD=$TEST_USER_PASSWORD add-user.sh "$uid" "$name" "$ou" "$groups"
     done
 
-    kill "$(cat /run/slapd/slapd.pid)"
-    while [ -f /run/slapd/slapd.pid ]; do sleep 1; done
+    stop_local
     echo "Directory created."
 fi
 

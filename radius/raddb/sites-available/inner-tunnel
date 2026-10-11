@@ -18,20 +18,20 @@ authorize {
 		&Calling-Station-Id := &outer.request:Calling-Station-Id
 	}
 
+	# Refuse PEAP-MSCHAPv2 when ALLOW_PEAP=no (policy.d/campus)
+	peap_gate
+
 	mschap
 
 	eap {
 		ok = return
 	}
 
-	reject_rate_limit
 	ldap
-
-	if ((ok || updated) && User-Password && !control:Auth-Type) {
-		update control {
-			&Auth-Type := ldap
-		}
-	}
+	# Password check with the configured backend (LDAP bind now; policy.d/campus)
+	password_backend
+	# After the lookup (counts by the stored uid), before the password check
+	reject_rate_limit
 
 	# Converts the hex NT hash from LDAP to binary, as mschap needs. Auth-Type is already set above.
 	pap
@@ -66,10 +66,17 @@ post-auth {
 		&Class := &reply:Class
 		&Acct-Interim-Interval := &reply:Acct-Interim-Interval
 	}
+	# Prefer the uid as stored in LDAP over the typed form (case can differ)
+	update outer.session-state {
+		&User-Name := &control:Tmp-String-5
+	}
 
 	Post-Auth-Type REJECT {
 		update outer.session-state {
 			&User-Name := &request:User-Name
+		}
+		update outer.session-state {
+			&User-Name := &control:Tmp-String-5
 		}
 		attr_filter.access_reject
 	}

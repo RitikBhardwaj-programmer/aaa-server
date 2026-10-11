@@ -7,7 +7,10 @@
 #   docker compose exec ldap add-user.sh 24IT002 "IT Student 24IT002" Students students
 #
 # Password: taken from $NEW_USER_PASSWORD if set, otherwise a random one is generated and printed once.
-# Stores userPassword ({SSHA}, for EAP-TTLS/PAP bind) and sambaNTPassword (NT hash, for PEAP-MSCHAPv2).
+# Stores userPassword ({ARGON2}, checked by an LDAP bind for EAP-TTLS/PAP). Only while ALLOW_PEAP=yes
+# it also stores sambaNTPassword (NT hash, needed by PEAP-MSCHAPv2; weak, and password-equivalent).
+# uid rule: letters, digits, '.', '_' and '-' only. Such a uid is also a valid Kerberos principal
+# name (uid@NITSRINAGAR.EDU), so a later move to Kerberos needs no renaming.
 set -eu
 
 if [ $# -ne 4 ]; then
@@ -29,27 +32,33 @@ else
     generated=yes
 fi
 
-ssha=$(slappasswd -h '{SSHA}' -s "$password")
-nt_hash=$(printf '%s' "$password" | iconv -f UTF-8 -t UTF-16LE \
-    | openssl dgst -md4 -provider default -provider legacy | awk '{print toupper($NF)}')
-count=$(ldap ldapsearch -LLL -b "$base" '(objectClass=sambaSamAccount)' dn | grep -c '^dn:' || true)
-rid=$((1001 + count))
+hash=$(slappasswd -o module-load="${ARGON2_MODULE:?ARGON2_MODULE not set}" -h '{ARGON2}' -s "$password")
 sn=${full_name##* }
 user_dn="uid=$uid,ou=$ou,$base"
+
+# NT hash and the Samba fields that carry it: only while PEAP is still allowed
+samba=""
+if [ "${ALLOW_PEAP:-yes}" = yes ]; then
+    nt_hash=$(printf '%s' "$password" | iconv -f UTF-8 -t UTF-16LE \
+        | openssl dgst -md4 -provider default -provider legacy | awk '{print toupper($NF)}')
+    count=$(ldap ldapsearch -LLL -b "$base" '(objectClass=sambaSamAccount)' dn | grep -c '^dn:' || true)
+    rid=$((1001 + count))
+    samba="objectClass: sambaSamAccount
+sambaSID: $domain_sid-$rid
+sambaNTPassword: $nt_hash
+sambaAcctFlags: [U          ]"
+fi
 
 ldap ldapadd >/dev/null <<EOF
 dn: $user_dn
 objectClass: inetOrgPerson
-objectClass: sambaSamAccount
 uid: $uid
 cn: $full_name
 sn: $sn
 mail: $uid@${LDAP_DOMAIN:-example.edu}
 ou: $ou
-userPassword: $ssha
-sambaSID: $domain_sid-$rid
-sambaNTPassword: $nt_hash
-sambaAcctFlags: [U          ]
+userPassword: $hash
+$samba
 EOF
 
 for group in $(echo "$groups" | tr ',' ' '); do

@@ -15,6 +15,7 @@ services:
       LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
       LDAP_RADIUS_PASSWORD: ${LDAP_RADIUS_PASSWORD}
       TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
+      ALLOW_PEAP: ${ALLOW_PEAP}
     volumes:
       - ldap-config:/etc/ldap/slapd.d
       - ldap-data:/var/lib/ldap
@@ -89,6 +90,8 @@ services:
       DEVICE_LIMIT_MODE: ${DEVICE_LIMIT_MODE}
       AUTH_REJECT_LIMIT: ${AUTH_REJECT_LIMIT}
       AUTH_REJECT_WINDOW: ${AUTH_REJECT_WINDOW}
+      ALLOW_PEAP: ${ALLOW_PEAP}
+      PASSWORD_BACKEND: ${PASSWORD_BACKEND}
       TZ: ${TZ}
     ports:
       - "1812:1812/udp"   # authentication
@@ -139,6 +142,7 @@ services:
       DEVICE_LIMIT_STUDENTS: ${DEVICE_LIMIT_STUDENTS}
       DEVICE_LIMIT_MODE: ${DEVICE_LIMIT_MODE}
       AUTH_REJECT_LIMIT: ${AUTH_REJECT_LIMIT}
+      ALLOW_PEAP: ${ALLOW_PEAP}
       POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
     volumes:
       - ./certs/ca.pem:/certs/ca.pem:ro

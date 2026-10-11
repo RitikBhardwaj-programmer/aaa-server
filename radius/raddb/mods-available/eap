@@ -1,6 +1,9 @@
 # EAP: PEAP (inner EAP-MSCHAPv2) and EAP-TTLS (inner PAP). Weak methods (MD5, GTC, LEAP) are not loaded.
+# EAP-TTLS/PAP is the default: it is the only method that also works with a Kerberos password
+# store later (Kerberos cannot check MSCHAPv2). PEAP stays available while ALLOW_PEAP=yes
+# (policy peap_gate in policy.d/campus), until existing devices move to TTLS.
 eap {
-	default_eap_type = peap
+	default_eap_type = ttls
 	timer_expire = 60
 	ignore_unknown_eap_types = no
 	cisco_accounting_username_bug = no

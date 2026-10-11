@@ -70,6 +70,10 @@ echo "== 1. Authentication + authorization over EAP (user, group -> VLAN / Class
 while read -r user vlan group; do
     for method in PEAP TTLS; do
         result=$(eap_login "$method" "$user" "$PW")
+        if [ "$method" = PEAP ] && [ "$ALLOW_PEAP" != yes ]; then
+            check "PEAP $user -> Reject (ALLOW_PEAP=no)" "$result" FAILURE
+            continue
+        fi
         got="$result $(attr 27 "$work/out") $(attr 29 "$work/out") $(attr 85 "$work/out") $(hex2str "$(attr 81 "$work/out")") $(hex2str "$(attr 25 "$work/out")") $(attr 1 "$work/out")"
         check "$method $user -> Accept, VLAN $vlan, Class $group" "$got" "SUCCESS $REAUTH_INTERVAL 1 $ACCT_INTERIM_INTERVAL $vlan $group $user"
     done
@@ -81,6 +85,29 @@ staff001 20 staff
 guest001 30 guests
 EOF
 
+echo "== 1b. Kerberos-ready defaults: EAP-TTLS first, stored uid in accounting"
+# A client that accepts both methods gets the server's default method (EAP type 21 = TTLS)
+cat > "$work/both.conf" <<EOF
+network={
+  key_mgmt=WPA-EAP
+  eap=PEAP TTLS
+  identity="student001"
+  anonymous_identity="anonymous"
+  password="$PW"
+  ca_cert="/certs/ca.pem"
+  domain_match="$SERVER_NAME"
+  phase2="auth=PAP"
+}
+EOF
+eapol_test -c "$work/both.conf" -a "$RADIUS" -s "$SECRET" -M 02:00:00:00:00:01 -t 10 > "$work/out" 2>&1
+check "server proposes EAP-TTLS first" "$(grep -o 'EAP vendor 0 method [0-9]* ([A-Z]*) selected' "$work/out" | tail -1)" "EAP vendor 0 method 21 (TTLS) selected"
+# LDAP matches uid without regard to case; accounting must still get the stored form,
+# or a student could pass the device limit by typing the name in another case
+check "TTLS login as '24it001' -> Accept carries User-Name 24IT001" \
+      "$(eap_login TTLS 24it001 "$PW") $(attr 1 "$work/out")" "SUCCESS 24IT001"
+out=$(echo "User-Name = \"STAFF001\", User-Password = \"$PW\", Message-Authenticator = 0x00" | radclient -x -r 1 -t 3 "$RADIUS:1812" auth "$SECRET" 2>&1)
+check "PAP login as 'STAFF001' -> Accept carries User-Name staff001" "$(echo "$out" | sed -n 's/^\s*User-Name = "\(.*\)"$/\1/p' | tail -1)" staff001
+
 echo "== 2. Rejections"
 for method in PEAP TTLS; do
     check "$method wrong password -> Reject"   "$(eap_login "$method" student001 wrong-password "" 02:00:00:00:0E:01)" FAILURE
@@ -89,7 +116,7 @@ for method in PEAP TTLS; do
 done
 
 echo "== 3. Client verifies the server certificate"
-check "PEAP with wrong expected server name -> client aborts" "$(eap_login PEAP student001 "$PW" evil.example.com)" FAILURE
+check "TTLS with wrong expected server name -> client aborts" "$(eap_login TTLS student001 "$PW" evil.example.com)" FAILURE
 if grep -q 'CTRL-EVENT-EAP-TLS-CERT-ERROR\|Domain name mismatch\|did not match' "$work/out"; then
     ok "abort reason is certificate name mismatch"
 else
@@ -159,7 +186,8 @@ for i in 1 2 3; do acct $u Start "dl-$run-$i" "02:00:${run:0:2}:${run:2:2}:0A:0$
 acct $u Start "dl-$run-1b" "02:00:${run:0:2}:${run:2:2}:0A:01" > /dev/null
 mac() { echo "02-00-${run:0:2}-${run:2:2}-0A-0$1"; }
 wait_for "SELECT COUNT(DISTINCT callingstationid) FROM radacct WHERE username = '$u' AND acctstoptime IS NULL;" 3 > /dev/null
-result=$(eap_login TTLS $u "$PW" "" "02:00:${run:0:2}:${run:2:2}:0A:04")
+# The 4th device logs in with the name in lower case: it must still count as 24IT001
+result=$(eap_login TTLS "$(echo $u | tr A-Z a-z)" "$PW" "" "02:00:${run:0:2}:${run:2:2}:0A:04")
 if [ "$DEVICE_LIMIT_MODE" = enforce ]; then
     check "4th device -> Reject (enforce)" "$result" FAILURE
 else

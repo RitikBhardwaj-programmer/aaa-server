@@ -32,15 +32,13 @@ authorize {
 		ok = return
 	}
 
-	# Non-EAP request (e.g. radtest with PAP): look the user up in LDAP and check the password with a bind
+	# Non-EAP request (e.g. radtest with PAP): look the user up in LDAP and check the password
+	# with the configured backend (a bind). The rate limit runs after the lookup, so it counts
+	# by the stored uid, and before the password check, so a limited device gets no check.
 	if (!EAP-Message) {
-		reject_rate_limit
 		ldap
-		if ((ok || updated) && User-Password && !control:Auth-Type) {
-			update control {
-				&Auth-Type := ldap
-			}
-		}
+		password_backend
+		reject_rate_limit
 	}
 }
 
@@ -82,6 +80,10 @@ post-auth {
 	# For EAP the policy already ran in the inner tunnel; its result is in session-state
 	if (!EAP-Message) {
 		campus_authorize
+		# Accounting and logs use the uid as stored in LDAP, not the typed form
+		update reply {
+			&User-Name := &control:Tmp-String-5
+		}
 	}
 
 	# Copy only the inner-tunnel result. ":=" replaces the outer "anonymous" User-Name
@@ -105,6 +107,13 @@ post-auth {
 	remove_reply_message_if_eap
 
 	Post-Auth-Type REJECT {
+		# Log the reject under the stored uid (PAP; EAP sets it in the inner tunnel).
+		# attr_filter.access_reject removes it from the reply again.
+		if (!EAP-Message) {
+			update reply {
+				&User-Name := &control:Tmp-String-5
+			}
+		}
 		sql
 		attr_filter.access_reject
 		eap

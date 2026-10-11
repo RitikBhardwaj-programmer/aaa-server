@@ -14,6 +14,9 @@ ldap {
 	# NT hash for PEAP-MSCHAPv2. TTLS/PAP does not need it: it uses an LDAP bind as the user.
 	update {
 		control:NT-Password := 'sambaNTPassword'
+		# The uid exactly as stored. LDAP matches uid without regard to case, so "24it001" logs in
+		# as 24IT001; accounting and the device limit must use the stored form (policy.d/campus).
+		control:Tmp-String-5 := 'uid'
 	}
 
 	user_dn = "LDAP-UserDn"

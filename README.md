@@ -5,7 +5,7 @@ It implements AAA for WPA2-Enterprise (802.1X):
 
 | AAA | Question | Where it happens |
 |---|---|---|
-| **Authentication** | Who are you? | FreeRADIUS checks the password against OpenLDAP (PEAP-MSCHAPv2 or EAP-TTLS/PAP) |
+| **Authentication** | Who are you? | FreeRADIUS checks the password against OpenLDAP. EAP-TTLS/PAP is the default; PEAP-MSCHAPv2 only while `ALLOW_PEAP=yes` |
 | **Authorization** | What may you do? | The LDAP group sets the session time limit and the VLAN, or rejects the user (`radius/raddb/policy.d/campus`) |
 | **Accounting** | What happened? | Session start / update / stop records go to PostgreSQL and to daily text files. They also drive the 3-device limit |
 
@@ -27,7 +27,7 @@ You need Docker Desktop (running) and PowerShell.
 cd "C:\Users\DELL\Networking Project\aaa-server"
 .\scripts\init.ps1            # creates .env (random secrets) and the lab certificates
 docker compose up -d --build  # starts ldap, postgres, maintenance, radius, ldapadmin
-.\scripts\test.ps1            # runs the 46 end-to-end tests
+.\scripts\test.ps1            # runs the 8 password-store checks and the 49 end-to-end tests
 ```
 
 All secrets are in `.env`. Git ignores `.env` and the `certs/` folder. Never share or commit them.
@@ -59,8 +59,10 @@ dc=nitsrinagar,dc=edu
 All test users have the password `TEST_USER_PASSWORD` from `.env`.
 
 Each user has two password hashes:
-- `userPassword` (`{SSHA}`) — EAP-TTLS/PAP checks it with an LDAP bind.
-- `sambaNTPassword` (NT hash) — PEAP-MSCHAPv2 needs it. Only the `cn=radius` account can read it.
+- `userPassword` (`{ARGON2}`; users made before 11 Oct 2026 keep `{SSHA}` until their next password change) — EAP-TTLS/PAP checks it with an LDAP bind. Users may change their own password (RFC 3062 Password Modify), nobody can read it.
+- `sambaNTPassword` (NT hash) — only while `ALLOW_PEAP=yes`, because PEAP-MSCHAPv2 needs it. Only the `cn=radius` account can read it.
+
+Login names are matched without regard to case (`24it001` logs in as `24IT001`), but accounting, the device limit and the logs always use the uid as stored in LDAP. Why the lab is Kerberos-ready but uses LDAP: `docs/decisions/0001-ldap-now-kerberos-later.md`.
 
 ## 3. Authorization policy
 
@@ -112,7 +114,7 @@ On Docker Desktop every AP appears as `10.89.0.1`. So the disconnect goes to `AP
 **Web UI:** open http://127.0.0.1:8080. Log in with DN `cn=admin,dc=nitsrinagar,dc=edu` and the password `LDAP_ADMIN_PASSWORD` from `.env`.
 Only the admin entry can log in. Wi-Fi users cannot.
 
-> If you change a password in the web UI, also update `sambaNTPassword`. If you do not, PEAP fails for that user.
+> If you change a password in the web UI while `ALLOW_PEAP=yes`, also update `sambaNTPassword`. If you do not, PEAP fails for that user.
 > To be safe, delete the user and create them again with `add-user.sh`.
 
 ## 5. Accounting
@@ -197,10 +199,10 @@ Every device must check the server certificate. If it does not, a fake AP can co
 
 | Device | Settings |
 |---|---|
-| **Android** | EAP method **PEAP**, Phase 2 **MSCHAPV2**. CA certificate: install `ca.pem` (Settings → Security → Install certificate → Wi-Fi), then select it. Domain `radius.nitsrinagar.lab`. Identity = user ID, anonymous identity `anonymous`. |
-| **Windows 10/11** | Import `ca.pem` into *Trusted Root Certification Authorities* (Local Computer). Connect to the SSID and enter the user ID and password. When Windows shows the certificate prompt, check that the issuer is "NIT Srinagar Lab CA". For strict checking, create a manual profile: PEAP, "Verify server identity", server `radius.nitsrinagar.lab`, trusted CA "NIT Srinagar Lab CA". |
+| **Android** | EAP method **TTLS**, Phase 2 **PAP**. CA certificate: install `ca.pem` (Settings → Security → Install certificate → Wi-Fi), then select it. Domain `radius.nitsrinagar.lab`. Identity = user ID, anonymous identity `anonymous`. (PEAP/MSCHAPV2 works only while `ALLOW_PEAP=yes`.) |
+| **Windows 10/11** | Import `ca.pem` into *Trusted Root Certification Authorities* (Local Computer). Create a manual profile: EAP-TTLS, inner method PAP ("Unencrypted password (PAP)"), "Verify server identity", server `radius.nitsrinagar.lab`, trusted CA "NIT Srinagar Lab CA". |
 | **iOS / macOS** | Join the SSID and enter the user ID and password. On the certificate screen, check that the certificate is `radius.nitsrinagar.lab` from "NIT Srinagar Lab CA", then tap Trust. |
-| **Linux (NetworkManager)** | WPA & WPA2 Enterprise → PEAP (MSCHAPv2) or TTLS (PAP). CA certificate `ca.pem`. Domain `radius.nitsrinagar.lab`. |
+| **Linux (NetworkManager)** | WPA & WPA2 Enterprise → TTLS (PAP). CA certificate `ca.pem`. Domain `radius.nitsrinagar.lab`. |
 
 ## 8. Troubleshooting
 
@@ -230,7 +232,8 @@ docker compose up -d --build
 
 ## 9. Security notes
 
-- The NT hash (`sambaNTPassword`) is weaker than SSHA. PEAP-MSCHAPv2 needs it. Only `cn=radius` and the admin can read it.
+- The NT hash (`sambaNTPassword`) is unsalted MD4 and works like the password itself for MSCHAPv2. It exists only while `ALLOW_PEAP=yes`. After the last PEAP device moves to TTLS/PAP, set `ALLOW_PEAP=no` and delete the existing values.
+- Passwords are hashed with Argon2 (`{ARGON2}`, argon2i, 19 MiB, 2 passes).
 - `certs/ca.key` signs server certificates. In a real deployment, keep it offline.
 - phpLDAPadmin listens only on `127.0.0.1`. LDAP has no published port.
 - `require_message_authenticator = yes` and `limit_proxy_state = yes` for the AP protect against BlastRADIUS (CVE-2024-3596).
@@ -253,5 +256,7 @@ docker compose up -d --build
 | `postgres/maintenance.sh` | Stale-session reaper, partition creation and retention, device expiry |
 | `certs/make-certs.sh` | Lab CA and server certificate |
 | `tests/run-tests.sh` | End-to-end tests |
+| `tests/ldap-checks.sh` | Password-store checks run inside the ldap container (Argon2, NT hash, self-service password change) |
+| `docs/decisions/` | Design decisions, e.g. `0001-ldap-now-kerberos-later.md` |
 | `scripts/` | `init.ps1`, `test.ps1`, `acct.ps1`, `disable-user.ps1`, `enable-user.ps1` |
 | `docs/aaa-lab-guide.html` | Illustrated explainer of the whole lab, with every component and diagram. Open it in a browser. |
