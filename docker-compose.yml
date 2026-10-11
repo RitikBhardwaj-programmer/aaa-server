@@ -23,6 +23,49 @@ services:
         ipv4_address: 10.89.0.10
     # No published port: only FreeRADIUS and phpLDAPadmin reach LDAP, over the internal network.
 
+  # Accounting database: sessions (radacct), login attempts (radpostauth), device-limit tables
+  postgres:
+    image: postgres:17.6-bookworm
+    hostname: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: radius
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
+      TZ: ${TZ}
+    volumes:
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./postgres/migrations:/migrations:ro
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "radius"]
+      interval: 5s
+      retries: 20
+    networks:
+      aaa:
+        ipv4_address: 10.89.0.40
+    # No published port: only FreeRADIUS, the maintenance job and the test tools reach it.
+
+  # Every MAINTENANCE_INTERVAL s: close stale sessions, manage monthly partitions, expire old devices
+  maintenance:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["sh", "/maintenance.sh"]
+    environment:
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
+      STALE_SESSION_MINUTES: ${STALE_SESSION_MINUTES}
+      ACCT_RETENTION_MONTHS: ${ACCT_RETENTION_MONTHS}
+      DEVICE_EXPIRY_DAYS: ${DEVICE_EXPIRY_DAYS}
+      MAINTENANCE_INTERVAL: ${MAINTENANCE_INTERVAL}
+    volumes:
+      - ./postgres/maintenance.sh:/maintenance.sh:ro
+    networks:
+      - aaa
+
   radius:
     build: ./radius
     hostname: radius
@@ -30,13 +73,22 @@ services:
     depends_on:
       ldap:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
       LDAP_BASE_DN: ${LDAP_BASE_DN}
       LDAP_RADIUS_PASSWORD: ${LDAP_RADIUS_PASSWORD}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
       RADIUS_SECRET_LOCAL: ${RADIUS_SECRET_LOCAL}
       RADIUS_SECRET_AP: ${RADIUS_SECRET_AP}
       AP_IP: ${AP_IP}
       REAUTH_INTERVAL: ${REAUTH_INTERVAL}
+      ACCT_INTERIM_INTERVAL: ${ACCT_INTERIM_INTERVAL}
+      STALE_SESSION_MINUTES: ${STALE_SESSION_MINUTES}
+      DEVICE_LIMIT_STUDENTS: ${DEVICE_LIMIT_STUDENTS}
+      DEVICE_LIMIT_MODE: ${DEVICE_LIMIT_MODE}
+      AUTH_REJECT_LIMIT: ${AUTH_REJECT_LIMIT}
+      AUTH_REJECT_WINDOW: ${AUTH_REJECT_WINDOW}
       TZ: ${TZ}
     ports:
       - "1812:1812/udp"   # authentication
@@ -82,6 +134,12 @@ services:
       TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
       RADIUS_SECRET_LOCAL: ${RADIUS_SECRET_LOCAL}
       REAUTH_INTERVAL: ${REAUTH_INTERVAL}
+      ACCT_INTERIM_INTERVAL: ${ACCT_INTERIM_INTERVAL}
+      STALE_SESSION_MINUTES: ${STALE_SESSION_MINUTES}
+      DEVICE_LIMIT_STUDENTS: ${DEVICE_LIMIT_STUDENTS}
+      DEVICE_LIMIT_MODE: ${DEVICE_LIMIT_MODE}
+      AUTH_REJECT_LIMIT: ${AUTH_REJECT_LIMIT}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
     volumes:
       - ./certs/ca.pem:/certs/ca.pem:ro
       - radius-acct:/radius-acct:ro
@@ -97,6 +155,7 @@ services:
     environment:
       RADIUS_SECRET_AP: ${RADIUS_SECRET_AP}
       AP_IP: ${AP_IP}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
     volumes:
       - radius-acct:/radius-acct:ro
     networks:
@@ -114,3 +173,4 @@ volumes:
   radius-acct:
   pla-sessions:
   pla-logs:
+  pg-data:

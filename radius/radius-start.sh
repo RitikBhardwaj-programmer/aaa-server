@@ -12,6 +12,6 @@ install -o root -g freerad -m 0644 "$SRC/ca.pem"     "$DST/ca.pem"
 install -o root -g freerad -m 0644 "$SRC/server.pem" "$DST/server.pem"
 install -o root -g freerad -m 0640 "$SRC/server.key" "$DST/server.key"
 
-install -d -o freerad -g freerad -m 0750 /var/log/freeradius/sqlite /var/log/freeradius/radacct
+install -d -o freerad -g freerad -m 0750 /var/log/freeradius/radacct /var/log/freeradius/radacct/spool
 
 exec /docker-entrypoint.sh "$@"

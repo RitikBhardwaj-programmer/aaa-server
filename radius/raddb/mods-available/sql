@@ -1,20 +1,21 @@
-# SQL module, used only for accounting (radacct) and the post-auth log (radpostauth).
+# SQL module (PostgreSQL), used for accounting (radacct), the post-auth log (radpostauth)
+# and the device-limit and rate-limit checks in policy.d/campus.
 # It is NOT used to look up users: LDAP is the only identity store.
+# Accounting reaches it through the buffered-sql spool (sites-available/buffered-sql), so a
+# database outage delays accounting records but never loses them.
 sql {
-	dialect = "sqlite"
-	driver = "rlm_sql_sqlite"
+	dialect = "postgresql"
+	driver = "rlm_sql_postgresql"
 
-	sqlite {
-		filename = "${logdir}/sqlite/radius.db"
-		busy_timeout = 1000
-		# Creates the standard schema the first time the database file is missing
-		bootstrap = "${modconfdir}/${..:name}/main/sqlite/schema.sql"
-	}
+	server = "postgres"
+	port = 5432
+	login = "radius"
+	password = "$ENV{POSTGRES_RADIUS_PASSWORD}"
+	radius_db = "radius"
 
 	# Log the real (inner) identity, not the anonymous outer identity of PEAP/TTLS
 	sql_user_name = "%{%{reply:User-Name}:-%{%{session-state:User-Name}:-%{User-Name}}}"
 
-	radius_db = "radius"
 	acct_table1 = "radacct"
 	acct_table2 = "radacct"
 	postauth_table = "radpostauth"
@@ -23,18 +24,19 @@ sql {
 	authreply_table = "radreply"
 	groupreply_table = "radgroupreply"
 	usergroup_table = "radusergroup"
-	delete_stale_sessions = yes
 	read_clients = no
 	client_table = "nas"
 	group_attribute = "SQL-Group"
 
 	pool {
-		start = 1
+		# 0: FreeRADIUS starts (and authenticates) even when PostgreSQL is down
+		start = 0
 		min = 1
-		max = 4
-		spare = 1
+		# One connection per worker thread, so threads never wait for a connection
+		max = ${thread[pool].max_servers}
+		spare = 4
 		uses = 0
-		retry_delay = 30
+		retry_delay = 5
 		lifetime = 0
 		idle_timeout = 60
 		max_retries = 5

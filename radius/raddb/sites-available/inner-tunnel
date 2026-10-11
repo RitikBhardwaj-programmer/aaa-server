@@ -11,12 +11,20 @@ listen {
 
 authorize {
 	filter_username
+
+	# The inner request has no Calling-Station-Id (copy_request_to_tunnel = no); the rate limit
+	# and the device limit need the device MAC, so take it from the outer request.
+	update request {
+		&Calling-Station-Id := &outer.request:Calling-Station-Id
+	}
+
 	mschap
 
 	eap {
 		ok = return
 	}
 
+	reject_rate_limit
 	ldap
 
 	if ((ok || updated) && User-Password && !control:Auth-Type) {
@@ -56,6 +64,7 @@ post-auth {
 		&Tunnel-Medium-Type := &reply:Tunnel-Medium-Type
 		&Tunnel-Private-Group-Id := &reply:Tunnel-Private-Group-Id
 		&Class := &reply:Class
+		&Acct-Interim-Interval := &reply:Acct-Interim-Interval
 	}
 
 	Post-Auth-Type REJECT {

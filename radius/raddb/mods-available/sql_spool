@@ -1,0 +1,10 @@
+# Accounting spool: sites-available/default writes every accounting packet here, and
+# sites-available/buffered-sql reads it back into PostgreSQL.
+detail sql_spool {
+	filename = "${radacctdir}/spool/detail-sql"
+	escape_filenames = no
+	permissions = 0600
+	header = "%t"
+	# Required: the buffered-sql reader works on the same file
+	locking = yes
+}

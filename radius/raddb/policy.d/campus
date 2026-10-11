@@ -16,6 +16,11 @@
 #
 # Class carries the group name; the AP echoes it in every accounting packet,
 # so accounting records show which group each session belongs to.
+#
+# Acct-Interim-Interval asks the AP for an accounting update every ACCT_INTERIM_INTERVAL
+# seconds. The device limit and the stale-session reaper rely on these updates.
+#
+# Students may use DEVICE_LIMIT_STUDENTS devices at the same time (policy device_limit below).
 campus_authorize {
 	if (LDAP-Group == "disabled") {
 		update reply {
@@ -55,6 +60,9 @@ campus_authorize {
 			&Class := "students"
 			&Reply-Message := "Welcome, student."
 		}
+		update control {
+			&Tmp-Integer-0 := $ENV{DEVICE_LIMIT_STUDENTS}
+		}
 	}
 	elsif (LDAP-Group == "guests") {
 		update reply {
@@ -72,5 +80,74 @@ campus_authorize {
 			&Reply-Message := "No Wi-Fi access group assigned."
 		}
 		reject
+	}
+
+	update reply {
+		&Acct-Interim-Interval := $ENV{ACCT_INTERIM_INTERVAL}
+	}
+
+	device_limit
+}
+
+# Device limit: a user may have at most control:Tmp-Integer-0 devices online at the same time
+# (set by group in campus_authorize; 0 or unset = no limit).
+# It counts DISTINCT device MACs with an open, recently updated session in radacct, except
+# the device logging in now. So roaming between APs (two rows, one MAC) and the device's own
+# re-check do not count twice, and a session with no update for STALE_SESSION_MINUTES
+# (lost Stop) does not count at all.
+#   DEVICE_LIMIT_MODE=soft     log the event in device_limit_events, let the device in
+#   DEVICE_LIMIT_MODE=enforce  log the event and reject the device
+# If PostgreSQL is down the count is 0, so the limit fails open and logins still work.
+# Limits (inference, see the IIT Delhi plan review): PMK-cached and FT reconnects skip RADIUS,
+# and accounting arrives a few seconds late, so two devices joining at the same moment can
+# both pass.
+device_limit {
+	if (&control:Tmp-Integer-0 && (&control:Tmp-Integer-0 > 0)) {
+		update control {
+			&Tmp-Integer-1 := "%{%{sql:SELECT COUNT(DISTINCT CallingStationId) FROM radacct \
+				WHERE UserName = '%{User-Name}' AND AcctStopTime IS NULL \
+				AND AcctUpdateTime > NOW() - INTERVAL '$ENV{STALE_SESSION_MINUTES} minutes' \
+				AND CallingStationId <> '%{Calling-Station-Id}'}:-0}"
+		}
+		if (&control:Tmp-Integer-1 >= &control:Tmp-Integer-0) {
+			update control {
+				&Tmp-String-1 := "%{sql:INSERT INTO device_limit_events \
+					(username, callingstationid, live_devices, device_limit, mode) \
+					VALUES ('%{User-Name}', '%{Calling-Station-Id}', %{control:Tmp-Integer-1}, \
+					%{control:Tmp-Integer-0}, '$ENV{DEVICE_LIMIT_MODE}')}"
+				# $ENV{} is expanded only in values like these, not inside a condition
+				&Tmp-String-2 := "$ENV{DEVICE_LIMIT_MODE}"
+			}
+			if (&control:Tmp-String-2 == "enforce") {
+				update reply {
+					&Reply-Message := "Device limit reached: %{control:Tmp-Integer-0} devices are already online. Disconnect one and try again."
+				}
+				reject
+			}
+		}
+	}
+}
+
+# Reject rate limit, used instead of account lockout. After AUTH_REJECT_LIMIT rejects for one
+# user from one device (MAC) in AUTH_REJECT_WINDOW minutes, that device is refused without
+# checking the password. Other devices of the same user are not affected, so an attacker who
+# guesses passwords cannot lock the real student out (a lockout would let them).
+# If PostgreSQL is down the count is 0 and the check is skipped.
+reject_rate_limit {
+	# Without a device MAC there is nothing to key the limit on (real APs always send one)
+	if (&Calling-Station-Id) {
+		update control {
+			&Tmp-Integer-2 := "%{%{sql:SELECT COUNT(*) FROM radpostauth \
+				WHERE username = '%{User-Name}' AND reply = 'Access-Reject' \
+				AND CallingStationId = '%{Calling-Station-Id}' \
+				AND authdate > NOW() - INTERVAL '$ENV{AUTH_REJECT_WINDOW} minutes'}:-0}"
+			&Tmp-Integer-3 := $ENV{AUTH_REJECT_LIMIT}
+		}
+		if (&control:Tmp-Integer-2 >= &control:Tmp-Integer-3) {
+			update reply {
+				&Reply-Message := "Too many failed logins from this device. Wait $ENV{AUTH_REJECT_WINDOW} minutes."
+			}
+			reject
+		}
 	}
 }

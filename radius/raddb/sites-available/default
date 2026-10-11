@@ -24,6 +24,8 @@ listen {
 authorize {
 	filter_username
 	preprocess
+	# MAC as AA-BB-CC-DD-EE-FF, the same form as in accounting (the device limit compares them)
+	rewrite_calling_station_id
 
 	# EAP conversation in progress: the eap module handles it
 	eap {
@@ -32,6 +34,7 @@ authorize {
 
 	# Non-EAP request (e.g. radtest with PAP): look the user up in LDAP and check the password with a bind
 	if (!EAP-Message) {
+		reject_rate_limit
 		ldap
 		if ((ok || updated) && User-Password && !control:Auth-Type) {
 			update control {
@@ -51,14 +54,23 @@ authenticate {
 # --- Accounting: what happened? ---
 preacct {
 	preprocess
+	rewrite_calling_station_id
 	acct_unique
 }
 
 accounting {
-	# Plain-text copy per NAS per day: /var/log/freeradius/radacct/<nas-ip>/detail-YYYYMMDD
+	# Plain-text copy per NAS per day, exactly as received (Event-Timestamp = the AP's clock):
+	# /var/log/freeradius/radacct/<nas-ip>/detail-YYYYMMDD
 	detail
-	# Queryable copy: SQLite table radacct
-	sql
+
+	# From here on, times are the server's receive time minus the AP's queueing delay.
+	# AP clocks can be wrong (the lab AP reports 2024), and CERT-In needs trusted time.
+	update request {
+		&Event-Timestamp := "%{expr:%l - %{%{Acct-Delay-Time}:-0}}"
+	}
+
+	# Queryable copy: spooled, then stored in PostgreSQL table radacct (sites-available/buffered-sql)
+	sql_spool
 	attr_filter.accounting_response
 }
 
@@ -82,10 +94,14 @@ post-auth {
 		&Tunnel-Medium-Type := &session-state:Tunnel-Medium-Type
 		&Tunnel-Private-Group-Id := &session-state:Tunnel-Private-Group-Id
 		&Class := &session-state:Class
+		&Acct-Interim-Interval := &session-state:Acct-Interim-Interval
 	}
 
-	# Log the accept in SQLite table radpostauth
-	sql
+	# Log the accept in PostgreSQL table radpostauth. If the database is down, log nothing
+	# but still accept (fail = 1 stops a database error from turning into a reject).
+	sql {
+		fail = 1
+	}
 	remove_reply_message_if_eap
 
 	Post-Auth-Type REJECT {
