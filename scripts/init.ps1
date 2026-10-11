@@ -22,6 +22,9 @@ $values = @{
     RADIUS_SECRET_AP         = New-Secret 32
     POSTGRES_PASSWORD        = New-Secret 24
     POSTGRES_RADIUS_PASSWORD = New-Secret 24
+    LDAP_PORTAL_PASSWORD     = New-Secret 24
+    POSTGRES_PORTAL_PASSWORD = New-Secret 24
+    PORTAL_SECRET_KEY        = New-Secret 48
     PLA_APP_KEY              = 'base64:' + [Convert]::ToBase64String($keyBytes)
 }
 if (Test-Path $envFile) {

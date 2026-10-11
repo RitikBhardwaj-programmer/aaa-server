@@ -2,3 +2,4 @@
 .env
 certs/*
 !certs/make-certs.sh
+__pycache__/

@@ -181,3 +181,6 @@ SELECT ensure_monthly_partitions('radacct');
 SELECT ensure_monthly_partitions('radpostauth');
 
 RESET ROLE;
+
+-- Read-only role for the self-service portal; needs the superuser, so it comes after RESET ROLE
+\i /migrations/002-portal-role.sql

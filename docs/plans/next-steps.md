@@ -6,6 +6,8 @@ Date: 2026-10-11. Branch: `feature/merged-aaa-core` (cut from `feature/instant-d
 Finish the merged AAA design from `reports/IIT Delhi AAA plan review.md` on the lab. The teacher's Kerberos decision (2026-10-11): not now, but keep a provision to add it later. The comparison is in `reports/ldap-vs-kerberos/LDAP-vs-Kerberos.pdf`.
 
 ## Done
+Phase C: self-service portal (Flask, LDAP bind login, RFC 3062 password change that also deletes the NT hash, my devices, disconnect), reviewed by an opus security review; 2 high, 2 medium and the actionable low findings fixed, promotion items listed in README 5b. 8 + 33 portal + 49 end-to-end tests pass with ALLOW_PEAP=yes and =no.
+
 Phase A: committed 5a0a4a3 after the Codex review (5 findings fixed). Phase B: Kerberos-ready provisions done (TTLS default, ALLOW_PEAP gate, {ARGON2}, PASSWORD_BACKEND, stored-uid accounting, self password change, decision record 0001); 8 password-store checks + 49 end-to-end tests pass with ALLOW_PEAP=yes and =no.
 
 Stages 1–3: PostgreSQL accounting (partitions, buffered-sql spool, server receive time), 3-device limit (soft/enforce), stale-session reaper, user_devices, per-device reject rate limit, Disconnect via PostgreSQL. 46/46 tests in both modes after the phase A review fixes; logins survive a database outage.

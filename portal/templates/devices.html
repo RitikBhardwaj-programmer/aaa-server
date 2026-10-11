@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}My devices{% endblock %}
+{% block content %}
+<h1>My devices</h1>
+{% if show_limit %}
+<p><strong>{{ online|length }} of {{ limit }} devices online.</strong> A student may use {{ limit }} devices at the same time.</p>
+{% endif %}
+
+<h2>Online now</h2>
+{% if live %}
+<div class="scroll">
+<table>
+  <caption class="sr">Devices with an active Wi-Fi session</caption>
+  <thead><tr><th scope="col">Device (MAC)</th><th scope="col">Access point</th><th scope="col">IP address</th><th scope="col">Started</th><th scope="col">Last update</th><th scope="col">Uploaded</th><th scope="col">Downloaded</th><th scope="col">Action</th></tr></thead>
+  <tbody>
+  {% for s in live %}
+    <tr>
+      <td>{{ s.callingstationid }}</td><td>{{ s.calledstationid or '-' }}</td><td>{{ s.ip or '-' }}</td>
+      <td>{{ s.acctstarttime|when }}</td><td>{{ s.acctupdatetime|when }}</td>
+      <td>{{ s.acctinputoctets|size }}</td><td>{{ s.acctoutputoctets|size }}</td>
+      <td>
+        <form method="post" action="{{ url_for('disconnect') }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="mac" value="{{ s.callingstationid }}">
+          <button type="submit" aria-label="Disconnect device {{ s.callingstationid }}">Disconnect</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="hint">Disconnect asks the access point to drop the device. If the access point does not answer, the device is dropped at the next re-check, within {{ reauth }} seconds.</p>
+{% else %}
+<p>No device is online.</p>
+{% endif %}
+
+<h2>Devices seen</h2>
+{% if known %}
+<div class="scroll">
+<table>
+  <caption class="sr">Every device seen with your ID</caption>
+  <thead><tr><th scope="col">Device (MAC)</th><th scope="col">First seen</th><th scope="col">Last seen</th><th scope="col">Status</th></tr></thead>
+  <tbody>
+  {% for d in known %}
+    <tr><td>{{ d.callingstationid }}</td><td>{{ d.first_seen|when }}</td><td>{{ d.last_seen|when }}</td><td>{{ 'online' if d.callingstationid in online else 'offline' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p>No device has been seen with your ID yet.</p>
+{% endif %}
+
+{% if events %}
+<h2>Device limit events</h2>
+<div class="scroll">
+<table>
+  <caption class="sr">Logins that found you at the device limit</caption>
+  <thead><tr><th scope="col">Time</th><th scope="col">Device (MAC)</th><th scope="col">Online</th><th scope="col">Limit</th><th scope="col">Result</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr><td>{{ e.eventtime|when }}</td><td>{{ e.callingstationid or '-' }}</td><td>{{ e.live_devices }}</td><td>{{ e.device_limit }}</td><td>{{ 'let in (logged only)' if e.mode == 'soft' else 'refused' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

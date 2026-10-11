@@ -26,8 +26,8 @@ You need Docker Desktop (running) and PowerShell.
 ```powershell
 cd "C:\Users\DELL\Networking Project\aaa-server"
 .\scripts\init.ps1            # creates .env (random secrets) and the lab certificates
-docker compose up -d --build  # starts ldap, postgres, maintenance, radius, ldapadmin
-.\scripts\test.ps1            # runs the 8 password-store checks and the 49 end-to-end tests
+docker compose up -d --build  # starts ldap, postgres, maintenance, radius, portal, ldapadmin
+.\scripts\test.ps1            # runs the 8 password-store checks, the 21 portal tests and the 49 end-to-end tests
 ```
 
 All secrets are in `.env`. Git ignores `.env` and the `certs/` folder. Never share or commit them.
@@ -41,6 +41,7 @@ All secrets are in `.env`. Git ignores `.env` and the `certs/` folder. Never sha
 | `postgres` | `postgres:17.6-bookworm` | internal network only | Accounting database (`radacct`, `radpostauth`, device-limit tables) |
 | `maintenance` | `postgres:17.6-bookworm` | — | Every 5 min: closes stale sessions, manages monthly partitions, expires old devices |
 | `ldapadmin` | `phpldapadmin/phpldapadmin:2.3.11` | http://127.0.0.1:8080 (this PC only) | Web UI to manage users |
+| `portal` | `python:3.12.14-slim-bookworm` + Flask | http://127.0.0.1:8081 (this PC only) | Self-service portal for Wi-Fi users (section 5b) |
 | `tests` | Debian 12 + `eapol_test` | runs on demand | Test suite (real 802.1X client, no Wi-Fi needed) |
 
 ### Directory layout
@@ -53,7 +54,8 @@ dc=nitsrinagar,dc=edu
 ├── ou=Staff      uid=staff001
 ├── ou=Guests     uid=guest001
 ├── ou=Groups     cn=students, cn=faculty, cn=staff, cn=guests, cn=disabled
-└── ou=Services   cn=radius  (read-only account that FreeRADIUS uses)
+└── ou=Services   cn=radius  (read-only account that FreeRADIUS uses; can read NT hashes)
+                 cn=portal  (read-only account of the portal; cannot read any password hash)
 ```
 
 All test users have the password `TEST_USER_PASSWORD` from `.env`.
@@ -150,6 +152,41 @@ Known limits: PMK-cached and 802.11r reconnects skip RADIUS, so the check runs o
 
 After `AUTH_REJECT_LIMIT` rejects for one user **from one device** in `AUTH_REJECT_WINDOW` minutes, that device is refused without a password check. The user's other devices still work, so nobody can lock a student out by guessing their password.
 
+## 5b. Self-service portal
+
+Open http://127.0.0.1:8081 on this PC. A Wi-Fi user logs in with the Wi-Fi ID and password and can:
+
+- **Change the password.** 15 to 128 characters, no other rules (NIST SP 800-63B-4). The password must not contain the user ID and must not be in `portal/blocklist.txt` (about 100 common passwords). The portal uses one backend function chosen by `PASSWORD_BACKEND`: `ldap` (RFC 3062 Password Modify as the user; slapd hashes it as `{ARGON2}`). `krb5` is a stub that answers "not set up" (decision 0001).
+- **See their devices.** Live sessions (MAC, access point, IP, start, last update, bytes), every device seen, "N of 3 devices online" for students, and recent device-limit events.
+- **Disconnect a device.** The portal sends an RFC 5176 Disconnect-Request for each open session of that MAC. It first checks that the session belongs to the logged-in user. The DAP-X3060 ignores the request, so the page says the device is dropped at the next re-check (within `REAUTH_INTERVAL`).
+
+**PEAP after a password change.** Password Modify updates only `userPassword`, so the portal first **deletes** the user's NT hash (`sambaNTPassword`); otherwise the old password would keep working for PEAP. PEAP then stops working for that user, and their devices must be set up as EAP-TTLS/PAP. The password page says so. (The LDAP ACL lets a user delete, but not read or write, their own NT hash.)
+
+Least privilege: the portal binds to LDAP as `cn=portal` (reads entries and groups, no password hashes) over one reused connection, and to PostgreSQL as role `portal` (SELECT on `radacct`, `user_devices`, `device_limit_events`). It never uses `cn=radius`. To check a login it finds the user with `cn=portal`, then binds as the user.
+
+Abuse limits (all counted before the password is checked, so parallel requests cannot slip through): 5 attempts per (ID, client address) and 20 per client address in 15 minutes; 5 wrong "current password" tries per user in 15 minutes; at most 4 logins at once (each costs slapd up to three Argon2 checks); one Disconnect-Request at a time and 5 per 5 minutes per user. Every login failure gives the same message.
+
+Sessions: CSRF tokens on every form; the cookie is `HttpOnly` and `SameSite=Strict`, ends after 15 minutes idle or 30 minutes after login. Every request re-checks the account in LDAP: a password change, a disabled account or a lost Wi-Fi group ends all sessions of that user, including a stolen copy of the cookie. A Content-Security-Policy forbids inline script and style. The AP secret reaches `radclient` through a private file (`-S`), never a command line. The portal refuses to start with a `PORTAL_SECRET_KEY` shorter than 32 characters.
+
+Database role on an existing database (first start does it by itself; needs `POSTGRES_PORTAL_PASSWORD` in `.env`):
+
+```powershell
+docker compose up -d postgres
+docker compose exec -T postgres psql -U postgres -d radius -v ON_ERROR_STOP=1 -f /migrations/002-portal-role.sql
+docker compose exec -T postgres sh /migrations/002-portal-password.sh
+```
+
+The LDAP account is added when the `ldap` container starts (`docker compose up -d --build ldap`), also on an existing directory.
+
+**Lab limits** (not for use by others on the LAN yet):
+- http only, on `127.0.0.1`. Over https set `SESSION_COOKIE_SECURE=true`.
+- Flask's built-in server. Production needs a real WSGI server, which is a new dependency and needs approval.
+- The rate limits are in the memory of one process. Several portal processes would each count alone and would need a shared store.
+- Behind Docker Desktop every client shows the same address, so the per-address limit (20 in 15 minutes) is shared by everyone using the portal in the lab.
+- Login timing differs slightly between unknown and known IDs (a known ID costs an Argon2 check).
+- The portal reaches LDAP over plain `ldap://` inside the Docker network.
+
+**Before others may use it** (from the security review of 11 Oct 2026): https with `SESSION_COOKIE_SECURE=true`; a WSGI server; StartTLS/LDAPS to slapd; a shared store for the rate limits; a large breached-password list instead of `blocklist.txt`; the ppolicy overlay with `olcPPolicyHashCleartext` (today a user with direct LDAP access could write their own `userPassword` and skip the portal's rules; port 389 is not published, so only the portal can); a separate Disconnect (DAS) secret instead of the AP's RADIUS secret; restricting phpLDAPadmin logins to the admin DN (service accounts share its objectClass); and a real-AP check that accounting `User-Name` is the inner identity, because the portal shows sessions by that name.
 ## 6. Connect the D-Link DIR-X6060 (Phase 3)
 
 ### 6.1 Check that the router supports WPA-Enterprise
@@ -240,6 +277,7 @@ docker compose up -d --build
 - Weak EAP methods (MD5, GTC, LEAP) are not enabled. TLS 1.2 is the minimum and the maximum (TLS 1.3 inside PEAP/TTLS is unreliable on FreeRADIUS 3.2). The TLS session cache is off, so a disabled user cannot resume an old session.
 - `radpostauth` never stores passwords. The stock FreeRADIUS query stores `User-Password`, which plain PAP requests carry.
 - PostgreSQL has no published port. FreeRADIUS uses the non-superuser role `radius`. `acct.ps1` opens a read-only session.
+- The portal uses its own read-only accounts (`cn=portal`, role `portal`). It is published on `127.0.0.1` only. See section 5b for its limits.
 
 ## 10. Files
 
@@ -256,7 +294,10 @@ docker compose up -d --build
 | `postgres/maintenance.sh` | Stale-session reaper, partition creation and retention, device expiry |
 | `certs/make-certs.sh` | Lab CA and server certificate |
 | `tests/run-tests.sh` | End-to-end tests |
+| `portal/` | Self-service portal: `app.py`, `templates/`, `static/portal.css`, `blocklist.txt`, `requirements.txt` (pinned), `tests/test_portal.py` |
+| `postgres/migrations/002-portal-*` | Read-only database role `portal` (SQL) and its password setter (script) |
+| `tests/portal-test-user.sh` | Creates and deletes the temporary user for the portal tests |
 | `tests/ldap-checks.sh` | Password-store checks run inside the ldap container (Argon2, NT hash, self-service password change) |
 | `docs/decisions/` | Design decisions, e.g. `0001-ldap-now-kerberos-later.md` |
-| `scripts/` | `init.ps1`, `test.ps1`, `acct.ps1`, `disable-user.ps1`, `enable-user.ps1` |
+| `scripts/` | `init.ps1`, `test.ps1` (all three suites), `acct.ps1`, `disable-user.ps1`, `enable-user.ps1` |
 | `docs/aaa-lab-guide.html` | Illustrated explainer of the whole lab, with every component and diagram. Open it in a browser. |

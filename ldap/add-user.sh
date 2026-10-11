@@ -32,7 +32,11 @@ else
     generated=yes
 fi
 
-hash=$(slappasswd -o module-load="${ARGON2_MODULE:?ARGON2_MODULE not set}" -h '{ARGON2}' -s "$password")
+# Through a private temporary file (-T), not the command line (visible in /proc while it runs)
+pwfile=$(mktemp)
+printf '%s' "$password" > "$pwfile"
+hash=$(slappasswd -o module-load="${ARGON2_MODULE:?ARGON2_MODULE not set}" -h '{ARGON2}' -T "$pwfile")
+rm -f "$pwfile"
 sn=${full_name##* }
 user_dn="uid=$uid,ou=$ou,$base"
 

@@ -1,0 +1,26 @@
+/* Plain, light, readable at phone width. No inline styles anywhere (Content-Security-Policy). */
+body { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: #1b2430; background: #f5f7fa; }
+header { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; align-items: center; padding: .75rem 1rem; background: #14325c; color: #fff; }
+header a, header .link { color: #fff; }
+.brand { font-weight: 700; }
+nav { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+main { max-width: 60rem; margin: 0 auto; padding: 1rem; }
+h1 { font-size: 1.5rem; margin-top: .5rem; }
+h2 { font-size: 1.2rem; margin-top: 1.5rem; }
+label { display: block; margin-top: 1rem; font-weight: 600; }
+input[type=text], input[type=password] { display: block; width: 100%; max-width: 24rem; box-sizing: border-box; padding: .6rem; font: inherit; border: 1px solid #5b6b80; border-radius: 4px; background: #fff; }
+button { padding: .55rem 1rem; font: inherit; color: #fff; background: #14325c; border: 0; border-radius: 4px; cursor: pointer; }
+form > button { margin-top: 1.25rem; }
+button.link { padding: 0; background: none; text-decoration: underline; }
+form.inline { display: inline; margin: 0; }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid #f2a900; outline-offset: 2px; }
+.note { padding: .6rem .8rem; border-left: 4px solid #5b6b80; background: #fff; }
+.note.ok { border-color: #1b7a3a; }
+.note.error { border-color: #b3261e; }
+.note.info { border-color: #b26a00; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; background: #fff; }
+th, td { padding: .45rem .6rem; border: 1px solid #c9d1dc; text-align: left; white-space: nowrap; }
+th { background: #e6ecf4; }
+.hint { color: #3d4b5d; font-size: .9rem; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
