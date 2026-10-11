@@ -152,6 +152,36 @@ Known limits: PMK-cached and 802.11r reconnects skip RADIUS, so the check runs o
 
 After `AUTH_REJECT_LIMIT` rejects for one user **from one device** in `AUTH_REJECT_WINDOW` minutes, that device is refused without a password check. The user's other devices still work, so nobody can lock a student out by guessing their password.
 
+### Who had this IP?
+
+```powershell
+.\scripts\who-had-ip.ps1 -Ip 10.20.30.40 -At "2026-10-11 14:30"
+```
+
+It answers: which user, device MAC, access point and session had this IPv4 address at that time. This is the first question CERT-In asks after an incident. It reads `radacct` through the function `who_had_ip(ip, at)` (migration `postgres/migrations/003-who-had-ip.sql`, with an index on `FramedIPAddress, AcctStartTime` on every partition) in a read-only session.
+
+- **Time zone.** A time without an offset is India time (+05:30). The script prints the exact UTC instant it searched. Write `...T09:00:00Z` or `...+05:30` to be explicit.
+- **Server time.** Sessions are compared on the server receive time, not the AP clock (the DAP-X3060 shows 2024). Use a lookup time from a trusted clock (NIC/NPL).
+- **Status.** `closed` (has a Stop, or was reaped: the stop time is the last update), `open` (still online, updates arriving), `stale-open` (open, but no update for more than `STALE_SESSION_MINUTES`; the AP may have lost the Stop; a time after the last update does not match).
+- **Exit code.** 0 found, 1 not found, 2 bad input, 3 database error.
+- **Limits.** IPv4 only (`FramedIPv6Address` is stored but not searched yet). Only devices whose AP sends `Framed-IP-Address` in accounting packets can be found. "Not found" does not prove nobody had the IP. Test it: connect a device, then search its IP.
+
+### Log chain (CERT-In / DPDP)
+
+RADIUS accounting is one of **three** logs. An incident usually starts with a public IP and port seen outside the campus. To reach a person, the three must be joined:
+
+```
+public IP:port --(NAT log)--> private IP --(DHCP log)--> MAC --(RADIUS accounting)--> user
+```
+
+The lab has no campus DHCP or NAT server, so nothing imports these logs yet. Expected import format, for a later step (keep 12 months, all on NIC/NPL time, same retention as `radacct`):
+
+| Source | Fields | Example line |
+|---|---|---|
+| DHCP lease log | time, event (assign/renew/release), IP, MAC, hostname | `2026-10-11T14:02:11+05:30,assign,10.20.30.40,02-00-CA-15-0C-01,galaxy-s23` |
+| NAT port-block log | time, event (alloc/free), private IP, public IP, port start, port end, protocol | `2026-10-11T14:02:12+05:30,alloc,10.20.30.40,203.0.113.7,20000,20999,tcp` |
+
+`who-had-ip` gives the MAC and user for a private IP. The DHCP log is a cross-check for the same lookup (a MAC with no Framed-IP in accounting), and the NAT log turns a public IP and port into the private IP.
 ## 5b. Self-service portal
 
 Open http://127.0.0.1:8081 on this PC. A Wi-Fi user logs in with the Wi-Fi ID and password and can:
@@ -295,9 +325,10 @@ docker compose up -d --build
 | `certs/make-certs.sh` | Lab CA and server certificate |
 | `tests/run-tests.sh` | End-to-end tests |
 | `portal/` | Self-service portal: `app.py`, `templates/`, `static/portal.css`, `blocklist.txt`, `requirements.txt` (pinned), `tests/test_portal.py` |
+| `postgres/migrations/003-who-had-ip.sql` | Index and the `who_had_ip` function (used by `scripts/who-had-ip.ps1`) |
 | `postgres/migrations/002-portal-*` | Read-only database role `portal` (SQL) and its password setter (script) |
 | `tests/portal-test-user.sh` | Creates and deletes the temporary user for the portal tests |
 | `tests/ldap-checks.sh` | Password-store checks run inside the ldap container (Argon2, NT hash, self-service password change) |
 | `docs/decisions/` | Design decisions, e.g. `0001-ldap-now-kerberos-later.md` |
-| `scripts/` | `init.ps1`, `test.ps1` (all three suites), `acct.ps1`, `disable-user.ps1`, `enable-user.ps1` |
+| `scripts/` | `init.ps1`, `test.ps1` (all three suites), `acct.ps1`, `who-had-ip.ps1`, `disable-user.ps1`, `enable-user.ps1` |
 | `docs/aaa-lab-guide.html` | Illustrated explainer of the whole lab, with every component and diagram. Open it in a browser. |

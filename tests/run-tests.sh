@@ -220,6 +220,41 @@ for i in $(seq 1 "$AUTH_REJECT_LIMIT"); do eap_login TTLS staff001 wrong-passwor
 check "correct password from the same device -> Reject (rate limited)" "$(eap_login TTLS staff001 "$PW" "" "02:00:${run:0:2}:${run:2:2}:0B:01")" FAILURE
 check "correct password from another device -> Accept (no lockout)" "$(eap_login TTLS staff001 "$PW" "" "02:00:${run:0:2}:${run:2:2}:0B:02")" SUCCESS
 
+echo "== 10. Who had this IP (who_had_ip over radacct, server receive times)"
+# One IP, used by guest001 and then by faculty001. Times are moved into the past with UPDATE, so
+# the checks use fixed offsets from now(). The IPs are 10.99.<x>.<y>, taken from the run tag.
+ipx=$((16#${run:0:2})); ipy=$((16#${run:2:2}))
+ip="10.99.$ipx.$ipy"; ip_reap="10.99.$(( (ipx + 1) % 256 )).$ipy"
+mac_a="02:00:${run:0:2}:${run:2:2}:0C:01"; mac_b="02:00:${run:0:2}:${run:2:2}:0C:02"
+who() { q "SELECT string_agg(username || ' ' || status, ',') FROM who_had_ip('$1', now() - interval '$2 minutes');"; }
+acct guest001 Start "wi-$run-a" "$mac_a" "Framed-IP-Address = $ip" > /dev/null
+acct guest001 Stop "wi-$run-a" "$mac_a" "Framed-IP-Address = $ip, Acct-Session-Time = 1200" > /dev/null
+wait_for "SELECT COUNT(*) FROM radacct WHERE acctsessionid = 'wi-$run-a' AND acctstoptime IS NOT NULL;" 1 > /dev/null
+acct faculty001 Start "wi-$run-b" "$mac_b" "Framed-IP-Address = $ip" > /dev/null
+wait_for "SELECT COUNT(*) FROM radacct WHERE acctsessionid = 'wi-$run-b';" 1 > /dev/null
+# A: 60..40 minutes ago (closed). B: from 30 minutes ago, still open, last update 1 minute ago.
+q "UPDATE radacct SET acctstarttime = now() - interval '60 minutes', acctupdatetime = now() - interval '40 minutes', acctstoptime = now() - interval '40 minutes' WHERE acctsessionid = 'wi-$run-a';" > /dev/null
+q "UPDATE radacct SET acctstarttime = now() - interval '30 minutes', acctupdatetime = now() - interval '1 minute' WHERE acctsessionid = 'wi-$run-b';" > /dev/null
+check "same IP, time inside the first session -> the first user" "$(who "$ip" 50)" "guest001 closed"
+check "same IP, time inside the second session -> the second user only" "$(who "$ip" 10)" "faculty001 open"
+check "time between the two sessions -> no rows" "$(who "$ip" 35)" ""
+check "time before any session -> no rows" "$(who "$ip" 90)" ""
+check "another IP -> no rows" "$(who "10.99.$ipx.$(( (ipy + 1) % 256 ))" 50)" ""
+check "row carries MAC, AP, NAS and session ID" \
+      "$(q "SELECT callingstationid || ' ' || nas || ' ' || acctsessionid FROM who_had_ip('$ip', now() - interval '10 minutes');")" "02-00-${run:0:2}-${run:2:2}-0C-02 $NAS wi-$run-b"
+# A session reaped after a lost Stop: its stop time is the last update, so later times do not match
+acct guest001 Start "wi-$run-c" "$mac_a" "Framed-IP-Address = $ip_reap" > /dev/null
+wait_for "SELECT COUNT(*) FROM radacct WHERE acctsessionid = 'wi-$run-c';" 1 > /dev/null
+q "UPDATE radacct SET acctstarttime = now() - interval '3 hours', acctupdatetime = now() - interval '2 hours' WHERE acctsessionid = 'wi-$run-c';" > /dev/null
+check "silent open session -> stale-open (up to its last update)" "$(who "$ip_reap" 150)" "guest001 stale-open"
+check "silent open session, time after its last update -> no rows" "$(who "$ip_reap" 90)" ""
+q "SELECT reap_stale_sessions($STALE_SESSION_MINUTES);" > /dev/null
+check "reaped session -> closed, Stale-Session-Reaped" \
+      "$(q "SELECT status || ' ' || acctterminatecause FROM who_had_ip('$ip_reap', now() - interval '150 minutes');")" "closed Stale-Session-Reaped"
+check "reaped session, time after its last update -> no rows" "$(who "$ip_reap" 90)" ""
+acct faculty001 Stop "wi-$run-b" "$mac_b" "Framed-IP-Address = $ip, Acct-Session-Time = 1800" > /dev/null
+wait_for "SELECT COUNT(*) FROM radacct WHERE acctsessionid = 'wi-$run-b' AND acctstoptime IS NULL;" 0 > /dev/null
+
 rm -rf "$work"
 echo
 echo "Result: $pass passed, $fail failed"

@@ -6,6 +6,8 @@ Date: 2026-10-11. Branch: `feature/merged-aaa-core` (cut from `feature/instant-d
 Finish the merged AAA design from `reports/IIT Delhi AAA plan review.md` on the lab. The teacher's Kerberos decision (2026-10-11): not now, but keep a provision to add it later. The comparison is in `reports/ldap-vs-kerberos/LDAP-vs-Kerberos.pdf`.
 
 ## Done
+Phase D: log lookup. `scripts/who-had-ip.ps1 -Ip -At` runs `who_had_ip()` (migration 003, index on `FramedIPAddress, AcctStartTime`) in a read-only session; 10 new end-to-end tests; DHCP/NAT import format documented in README section 5 only.
+
 Phase C: self-service portal (Flask, LDAP bind login, RFC 3062 password change that also deletes the NT hash, my devices, disconnect), reviewed by an opus security review; 2 high, 2 medium and the actionable low findings fixed, promotion items listed in README 5b. 8 + 33 portal + 49 end-to-end tests pass with ALLOW_PEAP=yes and =no.
 
 Phase A: committed 5a0a4a3 after the Codex review (5 findings fixed). Phase B: Kerberos-ready provisions done (TTLS default, ALLOW_PEAP gate, {ARGON2}, PASSWORD_BACKEND, stored-uid accounting, self password change, decision record 0001); 8 password-store checks + 49 end-to-end tests pass with ALLOW_PEAP=yes and =no.

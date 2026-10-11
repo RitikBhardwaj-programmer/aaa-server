@@ -180,6 +180,9 @@ END $$;
 SELECT ensure_monthly_partitions('radacct');
 SELECT ensure_monthly_partitions('radpostauth');
 
+-- "Who had this IP at this time?" lookup (index + who_had_ip function)
+\i /migrations/003-who-had-ip.sql
+
 RESET ROLE;
 
 -- Read-only role for the self-service portal; needs the superuser, so it comes after RESET ROLE
