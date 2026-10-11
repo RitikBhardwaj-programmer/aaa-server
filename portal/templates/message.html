@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
-<h1>{{ title }}</h1>
-<p class="note error" role="alert">{{ text }}</p>
-<p><a href="{{ url_for('index') }}">Back to the start page</a></p>
+<div class="narrow">
+  <h1>{{ title }}</h1>
+  <p class="note error" role="alert">{{ text }}</p>
+  <p><a href="{{ url_for('index') }}">Go to the start page</a></p>
+</div>
 {% endblock %}

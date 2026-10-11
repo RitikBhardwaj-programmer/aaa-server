@@ -17,7 +17,7 @@ import tempfile
 import threading
 import time
 from collections import deque
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import psycopg
 from flask import Flask, flash, redirect, render_template, request, session, url_for
@@ -436,6 +436,16 @@ def when(value):
     return value.strftime("%Y-%m-%d %H:%M:%S") if value else "-"
 
 
+@app.template_filter("clock")
+def clock(value):
+    """Short time for the device slots: "23:11" today, else "11 Oct 23:11" (database time zone)."""
+    if not value:
+        return "-"
+    if value.date() == datetime.now(value.tzinfo).date():
+        return value.strftime("%H:%M")
+    return value.strftime("%d %b %H:%M")
+
+
 @app.template_filter("size")
 def size(value):
     n = float(value or 0)
@@ -533,7 +543,15 @@ def devices():
         return render_template("message.html", title="Devices",
                                text="The device list is temporarily unavailable. Try again later."), 503
     online = {s["callingstationid"] for s in live}
-    return render_template("devices.html", uid=uid, live=live, known=known, events=events, online=online,
+    # One slot per device (a phone roaming between APs has several sessions), showing its newest
+    # session, in the order the devices joined: past the limit, the latest joiner is the one "over"
+    slots = {}
+    for s in live:                                   # newest session first
+        slot = slots.setdefault(s["callingstationid"], {"mac": s["callingstationid"], "session": s,
+                                                        "joined": s["acctstarttime"]})
+        slot["joined"] = min(slot["joined"], s["acctstarttime"])
+    slots = sorted(slots.values(), key=lambda d: d["joined"])
+    return render_template("devices.html", uid=uid, slots=slots, known=known, events=events, online=online,
                            show_limit=session.get("student") and DEVICE_LIMIT > 0, limit=DEVICE_LIMIT,
                            reauth=REAUTH_INTERVAL)
 
