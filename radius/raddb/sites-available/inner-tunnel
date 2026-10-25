@@ -28,8 +28,8 @@ authorize {
 	}
 
 	ldap
-	# Password check with the configured backend (LDAP bind now; policy.d/campus)
-	password_backend
+	# Password check: LDAP bind (policy.d/campus)
+	password_check
 	# After the lookup (counts by the stored uid), before the password check
 	reject_rate_limit
 

@@ -231,7 +231,7 @@ class PasswordTests(PortalCase):
                 self.assertIn("/login", c.get("/devices").headers["Location"])
         finally:
             if ldap_binds(dn, new):
-                portal.change_password_ldap(dn, new, PASSWORD)     # restore for the other tests
+                portal.change_password(dn, new, PASSWORD)     # restore for the other tests
         self.assertTrue(ldap_binds(dn, PASSWORD))
 
     def test_rules(self):
@@ -254,16 +254,6 @@ class PasswordTests(PortalCase):
         client = self.logged_in()
         page = client.get("/password").get_data(as_text=True)
         self.assertEqual("PEAP stops working" in page, portal.ALLOW_PEAP)
-
-    def test_krb5_backend_is_a_clear_stub(self):
-        with self.assertRaises(portal.PasswordChangeError) as ctx:
-            portal.change_password_krb5("dn", "old", "new")
-        self.assertIn("not set up", str(ctx.exception))
-        client = self.logged_in()
-        with mock.patch.object(portal, "PASSWORD_BACKEND", "krb5"):
-            resp = self.post_change(client, PASSWORD, secrets.token_hex(16))
-        self.assertEqual(resp.status_code, 400)
-        self.assertIn("not set up", resp.get_data(as_text=True))
 
 
 class DeviceTests(PortalCase):

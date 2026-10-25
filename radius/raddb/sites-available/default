@@ -33,11 +33,11 @@ authorize {
 	}
 
 	# Non-EAP request (e.g. radtest with PAP): look the user up in LDAP and check the password
-	# with the configured backend (a bind). The rate limit runs after the lookup, so it counts
+	# with an LDAP bind. The rate limit runs after the lookup, so it counts
 	# by the stored uid, and before the password check, so a limited device gets no check.
 	if (!EAP-Message) {
 		ldap
-		password_backend
+		password_check
 		reject_rate_limit
 	}
 }

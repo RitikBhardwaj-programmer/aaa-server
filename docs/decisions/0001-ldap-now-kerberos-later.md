@@ -1,6 +1,6 @@
 # 0001: LDAP password check now, Kerberos-ready for later
 
-Date: 2026-10-11. Status: accepted.
+Date: 2026-10-11. Status: superseded by 0002 (2026-10-25).
 
 ## Context
 The IIT Delhi plan stores passwords in MIT Kerberos and checks Wi-Fi passwords with rlm_krb5. Our comparison (`reports/ldap-vs-kerberos/LDAP-vs-Kerberos.pdf`) found that Wi-Fi cannot use Kerberos single sign-on: no deployed EAP method carries Kerberos tickets, so FreeRADIUS would only run a Kerberos login on the phone's behalf (about 3 KDC round trips instead of 1 bind), with extra servers and password-policy traps. The teacher's decision (2026-10-11): Kerberos may be used in the long run, not now; keep a provision to add it later.

@@ -451,7 +451,7 @@ flowchart TD
     <li>The NT hash is an unsalted MD4 value used by PEAP-MSCHAPv2. It is password-equivalent and is removed after a self-service password change.</li>
     <li>Existing <code>{SSHA}</code> user hashes remain until the user changes their password. They cannot be converted without the password.</li>
   </ul>
-  <p>The Kerberos-ready choices are documented in <a href="decisions/0001-ldap-now-kerberos-later.md"><code>docs/decisions/0001-ldap-now-kerberos-later.md</code></a>: <code>PASSWORD_BACKEND=ldap</code> selects the LDAP bind now; <code>krb5</code> is reserved and rejects clearly until it is built. The stored LDAP uid is used for accounting and both limits, so changing the case of a login name cannot bypass them.</p>
+  <p>The password check is an LDAP bind, and nothing else. See <a href="decisions/0002-no-kerberos.md"><code>docs/decisions/0002-no-kerberos.md</code></a>. The stored LDAP uid is used for accounting and both limits, so changing the case of a login name cannot bypass them.</p>
 </section>
 
 <!-- 8 -->
@@ -588,14 +588,14 @@ eap {
 	ok = return
 }
 ldap
-password_backend
+password_check
 reject_rate_limit
 <span class="c"># Converts the hex NT hash from LDAP to binary, as mschap needs. Auth-Type is already set above.</span>
 pap</pre></div>
   <ul>
     <li><code>mschap</code> sets <code>Auth-Type MS-CHAP</code> when MS-CHAP attributes are present (PEAP).</li>
     <li><code>ldap</code> finds the user and stores the canonical uid for accounting and limits.</li>
-    <li><code>password_backend</code> selects the LDAP bind when <code>PASSWORD_BACKEND=ldap</code>; the reserved <code>krb5</code> setting rejects until it is implemented.</li>
+    <li><code>password_check</code> sets <code>Auth-Type LDAP</code>, so slapd checks the password with a bind against the <code>{ARGON2}</code> hash.</li>
     <li><code>reject_rate_limit</code> applies the per-user, per-device reject limit before another password check.</li>
     <li><code>pap</code> runs last only to convert the 32-character hex NT hash into 16 bytes. Without it, MSCHAPv2 failed; see <a href="#bugs">section 17</a>.</li>
   </ul>
@@ -710,7 +710,7 @@ sequenceDiagram
   <h2><span class="num">13b</span>Self-service portal</h2>
   <p class="summary">At <code>http://127.0.0.1:8081</code>, Wi-Fi users can manage their own password and devices on this PC.</p>
   <p>A user signs in with their Wi-Fi ID and password. They can change the password, view live sessions and devices seen before, see recent device-limit events, and ask the AP to disconnect one of their devices. The portal checks that an open session belongs to the signed-in user before it sends a Disconnect-Request.</p>
-  <p>A password change uses the configured password backend. With <code>PASSWORD_BACKEND=ldap</code>, it uses LDAP Password Modify and slapd stores the new <code>{ARGON2}</code> hash. Before changing the password, the portal deletes <code>sambaNTPassword</code>. Otherwise an old password could keep working through PEAP. The user must then use EAP-TTLS/PAP for PEAP devices.</p>
+  <p>A password change uses LDAP Password Modify, and slapd stores the new <code>{ARGON2}</code> hash. Before changing the password, the portal deletes <code>sambaNTPassword</code>. Otherwise an old password could keep working through PEAP. The user must then use EAP-TTLS/PAP for PEAP devices.</p>
   <p>The portal has separate least-privilege accounts: LDAP <code>cn=portal</code> reads entries and groups but no password hash; PostgreSQL role <code>portal</code> has SELECT access to <code>radacct</code>, <code>user_devices</code> and <code>device_limit_events</code>. It never uses <code>cn=radius</code>.</p>
   <p><strong>Lab limits.</strong> The portal is HTTP only and bound to localhost. It uses Flask's built-in server. Its rate limits live in one process, and Docker Desktop makes the per-address limit shared by lab users. It reaches LDAP over plain <code>ldap://</code> inside the Docker network. Do not make it available to others until the promotion work listed in README section 5b is complete.</p>
 </section>

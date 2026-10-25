@@ -9,8 +9,7 @@
 # Password: taken from $NEW_USER_PASSWORD if set, otherwise a random one is generated and printed once.
 # Stores userPassword ({ARGON2}, checked by an LDAP bind for EAP-TTLS/PAP). Only while ALLOW_PEAP=yes
 # it also stores sambaNTPassword (NT hash, needed by PEAP-MSCHAPv2; weak, and password-equivalent).
-# uid rule: letters, digits, '.', '_' and '-' only. Such a uid is also a valid Kerberos principal
-# name (uid@NITSRINAGAR.EDU), so a later move to Kerberos needs no renaming.
+# uid rule: letters, digits, '.', '_' and '-' only.
 set -eu
 
 if [ $# -ne 4 ]; then

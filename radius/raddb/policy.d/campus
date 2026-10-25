@@ -156,9 +156,9 @@ reject_rate_limit {
 # module). The typed name can differ in case ("24it001" logs in as 24IT001), and counting by
 # the typed name would let a student pass the device limit by changing the case.
 
-# PEAP gate (inner tunnel, first thing in authorize). PEAP-MSCHAPv2 needs the weak NT hash and
-# cannot work with a Kerberos password store. ALLOW_PEAP=yes keeps it for devices not yet moved
-# to EAP-TTLS/PAP; ALLOW_PEAP=no refuses it.
+# PEAP gate (inner tunnel, first thing in authorize). PEAP-MSCHAPv2 needs the NT hash, which is
+# weak and password-equivalent, instead of the {ARGON2} hash. ALLOW_PEAP=yes keeps it for devices
+# not yet moved to EAP-TTLS/PAP; ALLOW_PEAP=no refuses it.
 # Test: an inner request that carries EAP is PEAP (or TTLS with inner EAP-MSCHAPv2, which needs
 # the NT hash too). EAP-TTLS/PAP sends a plain User-Password and is never refused here.
 # (In the outer server EAP-Type is not decoded before the eap module runs, so it cannot gate there.)
@@ -176,25 +176,12 @@ peap_gate {
 	}
 }
 
-# Password check. PASSWORD_BACKEND=ldap: LDAP bind as the user (the only backend set up now).
-# PASSWORD_BACKEND=krb5 is reserved for a later move to Kerberos (rlm_krb5 against an MIT KDC,
-# see docs/decisions/0001-ldap-now-kerberos-later.md); until that is built it rejects clearly
-# instead of falling back to another check. Call it right after the ldap module.
-password_backend {
+# Password check: LDAP bind as the user, so slapd checks the {ARGON2} hash. Call it right after
+# the ldap module.
+password_check {
 	if ((ok || updated) && &User-Password && !&control:Auth-Type) {
 		update control {
-			&Tmp-String-4 := "$ENV{PASSWORD_BACKEND}"
-		}
-		if (&control:Tmp-String-4 == "ldap") {
-			update control {
-				&Auth-Type := ldap
-			}
-		}
-		else {
-			update reply {
-				&Reply-Message := "Password backend '%{control:Tmp-String-4}' is not set up."
-			}
-			reject
+			&Auth-Type := ldap
 		}
 	}
 }

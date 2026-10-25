@@ -1,6 +1,6 @@
 # EAP: PEAP (inner EAP-MSCHAPv2) and EAP-TTLS (inner PAP). Weak methods (MD5, GTC, LEAP) are not loaded.
-# EAP-TTLS/PAP is the default: it is the only method that also works with a Kerberos password
-# store later (Kerberos cannot check MSCHAPv2). PEAP stays available while ALLOW_PEAP=yes
+# EAP-TTLS/PAP is the default: it sends the password, so the server can check the {ARGON2} hash.
+# MSCHAPv2 (PEAP) needs the weak NT hash instead. PEAP stays available while ALLOW_PEAP=yes
 # (policy peap_gate in policy.d/campus), until existing devices move to TTLS.
 eap {
 	default_eap_type = ttls

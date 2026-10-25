@@ -40,7 +40,6 @@ BASE_DN = need("LDAP_BASE_DN")
 PORTAL_DN = f"cn=portal,ou=Services,{BASE_DN}"
 PORTAL_PASSWORD = need("LDAP_PORTAL_PASSWORD")
 PG_PASSWORD = need("POSTGRES_PORTAL_PASSWORD")
-PASSWORD_BACKEND = os.environ.get("PASSWORD_BACKEND", "ldap")
 ALLOW_PEAP = os.environ.get("ALLOW_PEAP", "yes") == "yes"
 STALE_MINUTES = int(os.environ.get("STALE_SESSION_MINUTES", "25"))
 DEVICE_LIMIT = int(os.environ.get("DEVICE_LIMIT_STUDENTS", "3"))
@@ -274,7 +273,7 @@ def authenticate(typed_uid, password):
     return {"dn": dn, "uid": uid, "student": "students" in state["groups"], "version": state["version"]}
 
 
-# ---- Password change: one backend function (LDAP now, Kerberos later; docs/decisions/0001) -----
+# ---- Password change (LDAP Password Modify; docs/decisions/0002) -----
 
 class PasswordChangeError(Exception):
     """Message is safe to show to the user."""
@@ -284,7 +283,7 @@ class WrongOldPassword(PasswordChangeError):
     pass
 
 
-def change_password_ldap(dn, old, new):
+def change_password(dn, old, new):
     """RFC 3062 Password Modify as the user. slapd checks the old password and hashes the new one
     ({ARGON2}). userPassword is never written directly.
 
@@ -311,21 +310,6 @@ def change_password_ldap(dn, old, new):
         raise PasswordChangeError("The directory refused the new password.") from None
     finally:
         conn.unbind()
-
-
-def change_password_krb5(dn, old, new):
-    raise PasswordChangeError(
-        "Password change through Kerberos is not set up yet (PASSWORD_BACKEND=krb5 is reserved; "
-        "see docs/decisions/0001-ldap-now-kerberos-later.md).")
-
-
-PASSWORD_BACKENDS = {"ldap": change_password_ldap, "krb5": change_password_krb5}
-if PASSWORD_BACKEND not in PASSWORD_BACKENDS:
-    raise RuntimeError(f"PASSWORD_BACKEND must be one of {sorted(PASSWORD_BACKENDS)}")
-
-
-def change_password(dn, old, new):
-    PASSWORD_BACKENDS[PASSWORD_BACKEND](dn, old, new)
 
 
 def check_new_password(uid, new, confirm):

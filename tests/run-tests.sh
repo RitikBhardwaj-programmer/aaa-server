@@ -85,7 +85,7 @@ staff001 20 staff
 guest001 30 guests
 EOF
 
-echo "== 1b. Kerberos-ready defaults: EAP-TTLS first, stored uid in accounting"
+echo "== 1b. Secure defaults: EAP-TTLS first, stored uid in accounting"
 # A client that accepts both methods gets the server's default method (EAP type 21 = TTLS)
 cat > "$work/both.conf" <<EOF
 network={
