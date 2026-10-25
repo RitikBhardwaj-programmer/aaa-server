@@ -64,7 +64,7 @@ Each user has two password hashes:
 - `userPassword` (`{ARGON2}`; users made before 11 Oct 2026 keep `{SSHA}` until their next password change) — EAP-TTLS/PAP checks it with an LDAP bind. Users may change their own password (RFC 3062 Password Modify), nobody can read it.
 - `sambaNTPassword` (NT hash) — only while `ALLOW_PEAP=yes`, because PEAP-MSCHAPv2 needs it. Only the `cn=radius` account can read it.
 
-Login names are matched without regard to case (`24it001` logs in as `24IT001`), but accounting, the device limit and the logs always use the uid as stored in LDAP. Why passwords are checked only by an LDAP bind: `docs/decisions/0002-no-kerberos.md`.
+Login names are matched without regard to case (`24it001` logs in as `24IT001`), but accounting, the device limit and the logs always use the uid as stored in LDAP. Why passwords are checked only by an LDAP bind: `docs/decisions/0002-ldap-only.md`.
 
 ## 3. Authorization policy
 
@@ -329,6 +329,6 @@ docker compose up -d --build
 | `postgres/migrations/002-portal-*` | Read-only database role `portal` (SQL) and its password setter (script) |
 | `tests/portal-test-user.sh` | Creates and deletes the temporary user for the portal tests |
 | `tests/ldap-checks.sh` | Password-store checks run inside the ldap container (Argon2, NT hash, self-service password change) |
-| `docs/decisions/` | Design decisions, e.g. `0002-no-kerberos.md` |
+| `docs/decisions/` | Design decisions, e.g. `0002-ldap-only.md` |
 | `scripts/` | `init.ps1`, `test.ps1` (all three suites), `acct.ps1`, `who-had-ip.ps1`, `disable-user.ps1`, `enable-user.ps1` |
 | `docs/aaa-lab-guide.html` | Illustrated explainer of the whole lab, with every component and diagram. Open it in a browser. |

@@ -451,7 +451,7 @@ flowchart TD
     <li>The NT hash is an unsalted MD4 value used by PEAP-MSCHAPv2. It is password-equivalent and is removed after a self-service password change.</li>
     <li>Existing <code>{SSHA}</code> user hashes remain until the user changes their password. They cannot be converted without the password.</li>
   </ul>
-  <p>The password check is an LDAP bind, and nothing else. See <a href="decisions/0002-no-kerberos.md"><code>docs/decisions/0002-no-kerberos.md</code></a>. The stored LDAP uid is used for accounting and both limits, so changing the case of a login name cannot bypass them.</p>
+  <p>The password check is an LDAP bind, and nothing else. See <a href="decisions/0002-ldap-only.md"><code>docs/decisions/0002-ldap-only.md</code></a>. The stored LDAP uid is used for accounting and both limits, so changing the case of a login name cannot bypass them.</p>
 </section>
 
 <!-- 8 -->
