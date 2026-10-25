@@ -1,0 +1,161 @@
+/* NIT Srinagar Wi-Fi self-service portal.
+   Idea: the three device slots. Dal Lake ink and kesar (saffron); DIN-style condensed headings from
+   system fonts (the Content-Security-Policy allows no external fonts). No inline styles anywhere. */
+
+:root {
+  --ink: #12343b;        /* Dal Lake ink: text, header band, filled slots */
+  --snow: #eef3f1;       /* snowmelt: page background */
+  --paper: #ffffff;
+  --kesar: #d9981c;      /* saffron: slot marker, button edge */
+  --chinar: #a8432e;     /* errors, over-limit slot */
+  --willow: #3e6b55;     /* success, online */
+  --slate: #5b6b70;      /* secondary text, empty slots */
+  --rule: #c8d3d1;
+
+  --display: "Bahnschrift SemiCondensed", Bahnschrift, "DIN Alternate", "DIN Condensed",
+             "sans-serif-condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
+  --text: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font: 1rem/1.55 var(--text);
+  color: var(--ink);
+  background: var(--snow);
+}
+
+/* ---- Header band ---------------------------------------------------------------------------- */
+.band { background: var(--ink); color: var(--snow); }
+.band-inner {
+  max-width: 46rem; margin: 0 auto; padding: .85rem 1rem;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1.5rem;
+}
+.brand {
+  display: inline-flex; align-items: center; gap: .6rem;
+  font-family: var(--display); font-size: 1.25rem; font-weight: 600; letter-spacing: .01em;
+  color: var(--snow); text-decoration: none;
+}
+/* The mark: three slots, two filled */
+.mark { display: inline-flex; gap: 3px; }
+.mark i { display: block; width: 7px; height: 16px; border: 1.5px solid var(--kesar); border-radius: 1px; }
+.mark i:nth-child(-n+2) { background: var(--kesar); }
+
+nav { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1.25rem; }
+nav a, nav .link { color: var(--snow); text-decoration: none; font-size: .95rem; padding: .2rem 0; }
+nav a[aria-current="page"] { box-shadow: inset 0 -2px var(--kesar); }
+nav a:hover, nav .link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.who { opacity: .75; font-variant-numeric: tabular-nums; }
+
+/* ---- Page ----------------------------------------------------------------------------------- */
+main { max-width: 46rem; margin: 0 auto; padding: 1.75rem 1rem 3rem; }
+.narrow { max-width: 26rem; }
+
+h1, h2, .count, .mac { font-family: var(--display); font-weight: 600; letter-spacing: .005em; }
+h1 { font-size: 1.625rem; line-height: 1.2; margin: 0 0 .5rem; }
+h2 { font-size: 1.25rem; line-height: 1.25; margin: 2.5rem 0 .75rem; }
+p { margin: 0 0 1rem; max-width: 38rem; }
+.lead { color: var(--slate); }
+.hint { color: var(--slate); font-size: .9rem; }
+a { color: var(--ink); text-underline-offset: 3px; }
+
+/* The headline number of the page: how many slots are taken */
+.count { font-size: 2.5rem; line-height: 1.05; margin: .25rem 0 .5rem; font-variant-numeric: tabular-nums; }
+.count.over { color: var(--chinar); }
+
+/* ---- The slots: the one bold element -------------------------------------------------------- */
+.slots {
+  list-style: none; margin: 1.25rem 0 .75rem; padding: 0;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem;
+}
+.slots.open { grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); }
+.slot { min-width: 0; min-height: 15rem; padding: 1rem 1rem .9rem; display: flex; flex-direction: column; }
+.slot.filled {
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-top: 8px solid var(--kesar);          /* a filled slot is "lit" */
+}
+.slot.free {
+  border: 2px dashed var(--slate);
+  justify-content: center;
+  color: var(--slate);
+}
+.slot.free .mac { color: var(--slate); }
+.slot.over { border-color: var(--chinar); border-top-color: var(--chinar); }
+.over-note { color: var(--chinar); font-weight: 600; font-size: .9rem; margin: -.25rem 0 .5rem; }
+
+.mac { font-size: 1.15rem; margin: 0 0 .6rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.slot dl { margin: 0 0 1rem; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .15rem .75rem; font-size: .875rem; }
+.slot dt { color: var(--slate); }
+.slot dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.slot form { margin-top: auto; }
+
+/* ---- Forms ---------------------------------------------------------------------------------- */
+.stack { margin-top: 1.5rem; }
+label { display: block; margin: 1.1rem 0 .35rem; font-weight: 600; }
+label:first-of-type { margin-top: 0; }
+input[type=text], input[type=password] {
+  display: block; width: 100%; padding: .65rem .75rem;
+  font: inherit; color: var(--ink);
+  background: var(--paper); border: 2px solid var(--slate); border-radius: 3px;
+}
+input[type=text]:hover, input[type=password]:hover { border-color: var(--ink); }
+.stack .hint { margin: .4rem 0 0; }
+
+button { font: inherit; cursor: pointer; border-radius: 3px; }
+button.primary {
+  margin-top: 1.5rem; padding: .7rem 1.4rem;
+  font-family: var(--display); font-size: 1.05rem; font-weight: 600; letter-spacing: .02em;
+  color: var(--snow); background: var(--ink);
+  border: 0; border-bottom: 4px solid var(--kesar);
+}
+button.primary:hover { background: #0b262b; }
+button.secondary {
+  padding: .45rem 1rem; font-weight: 600;
+  color: var(--ink); background: transparent; border: 2px solid var(--ink);
+}
+button.secondary:hover { background: var(--snow); }
+.slot.over button.secondary { border-color: var(--chinar); color: var(--chinar); }
+button.link { padding: .2rem 0; background: none; border: 0; }
+form.inline { display: inline; margin: 0; }
+
+/* Keyboard focus: always visible, high contrast on both backgrounds */
+a:focus-visible, button:focus-visible, input:focus-visible {
+  outline: 3px solid var(--kesar); outline-offset: 2px; box-shadow: 0 0 0 5px var(--ink);
+}
+.band a:focus-visible, .band button:focus-visible { box-shadow: none; }
+
+.skip { position: absolute; left: -999px; top: .5rem; padding: .5rem .75rem; background: var(--paper); color: var(--ink); z-index: 1; }
+.skip:focus { left: .5rem; }
+
+/* ---- Notes (flash messages, errors) --------------------------------------------------------- */
+.note {
+  max-width: 38rem; margin: 0 0 1.25rem; padding: .75rem 1rem;
+  background: var(--paper); border-left: 5px solid var(--slate);
+}
+.note.ok { border-color: var(--willow); }
+.note.error { border-color: var(--chinar); }
+.note.info { border-color: var(--kesar); }
+
+/* ---- Quiet tables --------------------------------------------------------------------------- */
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { padding: .5rem .75rem .5rem 0; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--rule); }
+th { font-weight: 600; color: var(--slate); border-bottom-color: var(--ink); }
+td.num { font-variant-numeric: tabular-nums; }
+.on { color: var(--willow); font-weight: 600; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---- Phones: slots stack, the count stays big ------------------------------------------------ */
+@media (max-width: 40rem) {
+  .slots, .slots.open { grid-template-columns: 1fr; }
+  .slot { min-height: 0; }
+  .slot.free { min-height: 5.5rem; }
+  .count { font-size: 2.125rem; }
+  main { padding-top: 1.25rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

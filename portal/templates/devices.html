@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}My devices{% endblock %}
+{% block content %}
+{# slots: one per device (MAC), in joining order; see devices() in app.py #}
+{% set over = show_limit and online|length > limit %}
+<h1>My devices</h1>
+
+{% if show_limit %}
+<p class="count{% if over %} over{% endif %}">{{ online|length }} of {{ limit }} devices online</p>
+<p class="lead">A student may use {{ limit }} devices at the same time. To add another device when all slots are full, disconnect one here first.</p>
+{% else %}
+<p class="count">{{ online|length }} {{ 'device' if online|length == 1 else 'devices' }} online</p>
+{% endif %}
+
+<ol class="slots{% if not show_limit %} open{% endif %}" aria-label="Devices online now">
+  {% for slot in slots %}
+  {% set mac, s = slot.mac, slot.session %}
+  <li class="slot filled{% if show_limit and loop.index > limit %} over{% endif %}">
+    <p class="mac">{{ mac }}</p>
+    {% if show_limit and loop.index > limit %}<p class="over-note">Over the limit</p>{% endif %}
+    <dl>
+      <dt>Access point</dt><dd>{{ s.calledstationid or '-' }}</dd>
+      <dt>IP address</dt><dd>{{ s.ip or '-' }}</dd>
+      <dt>Online since</dt><dd><time datetime="{{ s.acctstarttime.isoformat() if s.acctstarttime else '' }}" title="{{ s.acctstarttime|when }}">{{ s.acctstarttime|clock }}</time></dd>
+      <dt>Last update</dt><dd><time datetime="{{ s.acctupdatetime.isoformat() if s.acctupdatetime else '' }}" title="{{ s.acctupdatetime|when }}">{{ s.acctupdatetime|clock }}</time></dd>
+      <dt>Uploaded</dt><dd>{{ s.acctinputoctets|size }}</dd>
+      <dt>Downloaded</dt><dd>{{ s.acctoutputoctets|size }}</dd>
+    </dl>
+    <form method="post" action="{{ url_for('disconnect') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="mac" value="{{ mac }}">
+      <button type="submit" class="secondary" aria-label="Disconnect device {{ mac }}">Disconnect</button>
+    </form>
+  </li>
+  {% endfor %}
+  {% if show_limit %}
+  {% for _ in range(limit - online|length) %}
+  <li class="slot free">
+    <p class="mac">Free</p>
+    <p class="hint">A device can join with your ID.</p>
+  </li>
+  {% endfor %}
+  {% elif not online %}
+  <li class="slot free">
+    <p class="mac">No device online</p>
+    <p class="hint">Devices appear here while they use the Wi-Fi with your ID.</p>
+  </li>
+  {% endif %}
+</ol>
+{% if online %}
+<p class="hint">Disconnect asks the access point to drop the device. If the access point does not answer, the device is dropped at the next re-check, within {{ reauth }} seconds.</p>
+{% endif %}
+
+<section aria-labelledby="seen">
+  <h2 id="seen">Devices seen</h2>
+  {% if known %}
+  <div class="scroll">
+  <table>
+    <caption class="sr">Every device seen with your ID</caption>
+    <thead><tr><th scope="col">Device (MAC)</th><th scope="col">First seen</th><th scope="col">Last seen</th><th scope="col">Now</th></tr></thead>
+    <tbody>
+    {% for d in known %}
+      <tr><td class="num">{{ d.callingstationid }}</td><td class="num">{{ d.first_seen|when }}</td><td class="num">{{ d.last_seen|when }}</td>
+          <td>{% if d.callingstationid in online %}<span class="on">online</span>{% else %}offline{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint">A device that is not seen for 30 days is removed from this list. Phones that change their Wi-Fi address can appear more than once.</p>
+  {% else %}
+  <p>No device has used the Wi-Fi with your ID yet.</p>
+  {% endif %}
+</section>
+
+{% if events %}
+<section aria-labelledby="limit-events">
+  <h2 id="limit-events">When the limit was reached</h2>
+  <div class="scroll">
+  <table>
+    <caption class="sr">Logins that found you at the device limit</caption>
+    <thead><tr><th scope="col">Time</th><th scope="col">Device (MAC)</th><th scope="col">Online then</th><th scope="col">Result</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr><td class="num">{{ e.eventtime|when }}</td><td class="num">{{ e.callingstationid or '-' }}</td>
+          <td class="num">{{ e.live_devices }} of {{ e.device_limit }}</td>
+          <td>{{ 'let in (logged only)' if e.mode == 'soft' else 'refused' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

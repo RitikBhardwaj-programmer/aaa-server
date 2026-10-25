@@ -14,7 +14,9 @@ services:
       LDAP_ORG: ${LDAP_ORG}
       LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
       LDAP_RADIUS_PASSWORD: ${LDAP_RADIUS_PASSWORD}
+      LDAP_PORTAL_PASSWORD: ${LDAP_PORTAL_PASSWORD}
       TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
+      ALLOW_PEAP: ${ALLOW_PEAP}
     volumes:
       - ldap-config:/etc/ldap/slapd.d
       - ldap-data:/var/lib/ldap
@@ -23,6 +25,50 @@ services:
         ipv4_address: 10.89.0.10
     # No published port: only FreeRADIUS and phpLDAPadmin reach LDAP, over the internal network.
 
+  # Accounting database: sessions (radacct), login attempts (radpostauth), device-limit tables
+  postgres:
+    image: postgres:17.6-bookworm
+    hostname: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: radius
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
+      POSTGRES_PORTAL_PASSWORD: ${POSTGRES_PORTAL_PASSWORD}
+      TZ: ${TZ}
+    volumes:
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./postgres/migrations:/migrations:ro
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "radius"]
+      interval: 5s
+      retries: 20
+    networks:
+      aaa:
+        ipv4_address: 10.89.0.40
+    # No published port: only FreeRADIUS, the maintenance job, the portal and the test tools reach it.
+
+  # Every MAINTENANCE_INTERVAL s: close stale sessions, manage monthly partitions, expire old devices
+  maintenance:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["sh", "/maintenance.sh"]
+    environment:
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
+      STALE_SESSION_MINUTES: ${STALE_SESSION_MINUTES}
+      ACCT_RETENTION_MONTHS: ${ACCT_RETENTION_MONTHS}
+      DEVICE_EXPIRY_DAYS: ${DEVICE_EXPIRY_DAYS}
+      MAINTENANCE_INTERVAL: ${MAINTENANCE_INTERVAL}
+    volumes:
+      - ./postgres/maintenance.sh:/maintenance.sh:ro
+    networks:
+      - aaa
+
   radius:
     build: ./radius
     hostname: radius
@@ -30,13 +76,23 @@ services:
     depends_on:
       ldap:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
       LDAP_BASE_DN: ${LDAP_BASE_DN}
       LDAP_RADIUS_PASSWORD: ${LDAP_RADIUS_PASSWORD}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
       RADIUS_SECRET_LOCAL: ${RADIUS_SECRET_LOCAL}
       RADIUS_SECRET_AP: ${RADIUS_SECRET_AP}
       AP_IP: ${AP_IP}
       REAUTH_INTERVAL: ${REAUTH_INTERVAL}
+      ACCT_INTERIM_INTERVAL: ${ACCT_INTERIM_INTERVAL}
+      STALE_SESSION_MINUTES: ${STALE_SESSION_MINUTES}
+      DEVICE_LIMIT_STUDENTS: ${DEVICE_LIMIT_STUDENTS}
+      DEVICE_LIMIT_MODE: ${DEVICE_LIMIT_MODE}
+      AUTH_REJECT_LIMIT: ${AUTH_REJECT_LIMIT}
+      AUTH_REJECT_WINDOW: ${AUTH_REJECT_WINDOW}
+      ALLOW_PEAP: ${ALLOW_PEAP}
       TZ: ${TZ}
     ports:
       - "1812:1812/udp"   # authentication
@@ -71,6 +127,68 @@ services:
       aaa:
         ipv4_address: 10.89.0.30
 
+  # Self-service portal for Wi-Fi users: log in, change password, see and disconnect own devices.
+  # Flask's built-in server is for the lab only; production needs a real WSGI server (needs approval,
+  # because it is a new dependency). Published on this PC only, never on the LAN.
+  portal:
+    build: ./portal
+    hostname: portal
+    restart: unless-stopped
+    depends_on:
+      ldap:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment: &portal-env
+      LDAP_BASE_DN: ${LDAP_BASE_DN}
+      LDAP_PORTAL_PASSWORD: ${LDAP_PORTAL_PASSWORD}
+      POSTGRES_PORTAL_PASSWORD: ${POSTGRES_PORTAL_PASSWORD}
+      PORTAL_SECRET_KEY: ${PORTAL_SECRET_KEY}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE}
+      ALLOW_PEAP: ${ALLOW_PEAP}
+      STALE_SESSION_MINUTES: ${STALE_SESSION_MINUTES}
+      DEVICE_LIMIT_STUDENTS: ${DEVICE_LIMIT_STUDENTS}
+      REAUTH_INTERVAL: ${REAUTH_INTERVAL}
+      RADIUS_SECRET_AP: ${RADIUS_SECRET_AP}
+      AP_IP: ${AP_IP}
+      TZ: ${TZ}
+    ports:
+      - "127.0.0.1:8081:8081"   # localhost only, never exposed to the LAN
+    # Hardening: read-only file system (only /tmp is writable, in memory: the radclient secret file),
+    # no Linux capabilities, no privilege gain through setuid programs
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      aaa:
+        ipv4_address: 10.89.0.60
+
+  # Portal tests (stdlib unittest, Flask test client) against the live LDAP and PostgreSQL.
+  # A separate service, so the running portal never holds the test-only radius database password.
+  portal-test:
+    build: ./portal
+    profiles: ["test"]
+    depends_on:
+      ldap:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    entrypoint: ["python", "-m", "unittest", "-v", "tests.test_portal"]
+    environment:
+      <<: *portal-env
+      TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
+      # Test only: cn=radius can read NT hashes, to prove a password change deletes the old one
+      LDAP_RADIUS_PASSWORD: ${LDAP_RADIUS_PASSWORD}
+      # Temporary user made by scripts/test.ps1; compose copies these from the calling shell
+      PORTAL_TEST_UID:
+      PORTAL_TEST_PASSWORD:
+    networks:
+      - aaa
+
   tests:
     build: ./tests
     profiles: ["test"]
@@ -82,6 +200,13 @@ services:
       TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
       RADIUS_SECRET_LOCAL: ${RADIUS_SECRET_LOCAL}
       REAUTH_INTERVAL: ${REAUTH_INTERVAL}
+      ACCT_INTERIM_INTERVAL: ${ACCT_INTERIM_INTERVAL}
+      STALE_SESSION_MINUTES: ${STALE_SESSION_MINUTES}
+      DEVICE_LIMIT_STUDENTS: ${DEVICE_LIMIT_STUDENTS}
+      DEVICE_LIMIT_MODE: ${DEVICE_LIMIT_MODE}
+      AUTH_REJECT_LIMIT: ${AUTH_REJECT_LIMIT}
+      ALLOW_PEAP: ${ALLOW_PEAP}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
     volumes:
       - ./certs/ca.pem:/certs/ca.pem:ro
       - radius-acct:/radius-acct:ro
@@ -97,6 +222,7 @@ services:
     environment:
       RADIUS_SECRET_AP: ${RADIUS_SECRET_AP}
       AP_IP: ${AP_IP}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
     volumes:
       - radius-acct:/radius-acct:ro
     networks:
@@ -114,3 +240,4 @@ volumes:
   radius-acct:
   pla-sessions:
   pla-logs:
+  pg-data:

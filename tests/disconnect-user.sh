@@ -7,16 +7,19 @@
 # The target of each request is the session's NAS address from radacct. On Docker Desktop
 # every NAS appears as the Docker gateway, so that address is replaced with AP_IP from .env.
 set -u
-DB="file:/radius-acct/sqlite/radius.db?immutable=1"
+export PGHOST=postgres PGUSER=radius PGDATABASE=radius PGPASSWORD=${POSTGRES_RADIUS_PASSWORD:?POSTGRES_RADIUS_PASSWORD not set}
 DOCKER_GATEWAY=10.89.0.1
 DAS_PORT=3799
 
 uid=${1:-}
 case "$uid" in *[!A-Za-z0-9._-]*|'') echo "Usage: disconnect-user.sh <uid>" >&2; exit 2;; esac
 
-sessions=$(sqlite3 -separator '|' "$DB" \
-    "SELECT nasipaddress, acctsessionid, callingstationid FROM radacct
-     WHERE username = '$uid' AND acctstoptime IS NULL;")
+# host() strips the /32 that PostgreSQL prints for inet values
+sessions=$(psql -qAt -v uid="$uid" <<'EOF'
+SELECT host(nasipaddress), acctsessionid, callingstationid FROM radacct
+WHERE username = :'uid' AND acctstoptime IS NULL;
+EOF
+)
 if [ -z "$sessions" ]; then
     echo "No open sessions for $uid."
     exit 0

@@ -11,6 +11,16 @@ listen {
 
 authorize {
 	filter_username
+
+	# The inner request has no Calling-Station-Id (copy_request_to_tunnel = no); the rate limit
+	# and the device limit need the device MAC, so take it from the outer request.
+	update request {
+		&Calling-Station-Id := &outer.request:Calling-Station-Id
+	}
+
+	# Refuse PEAP-MSCHAPv2 when ALLOW_PEAP=no (policy.d/campus)
+	peap_gate
+
 	mschap
 
 	eap {
@@ -18,12 +28,10 @@ authorize {
 	}
 
 	ldap
-
-	if ((ok || updated) && User-Password && !control:Auth-Type) {
-		update control {
-			&Auth-Type := ldap
-		}
-	}
+	# Password check: LDAP bind (policy.d/campus)
+	password_check
+	# After the lookup (counts by the stored uid), before the password check
+	reject_rate_limit
 
 	# Converts the hex NT hash from LDAP to binary, as mschap needs. Auth-Type is already set above.
 	pap
@@ -56,11 +64,19 @@ post-auth {
 		&Tunnel-Medium-Type := &reply:Tunnel-Medium-Type
 		&Tunnel-Private-Group-Id := &reply:Tunnel-Private-Group-Id
 		&Class := &reply:Class
+		&Acct-Interim-Interval := &reply:Acct-Interim-Interval
+	}
+	# Prefer the uid as stored in LDAP over the typed form (case can differ)
+	update outer.session-state {
+		&User-Name := &control:Tmp-String-5
 	}
 
 	Post-Auth-Type REJECT {
 		update outer.session-state {
 			&User-Name := &request:User-Name
+		}
+		update outer.session-state {
+			&User-Name := &control:Tmp-String-5
 		}
 		attr_filter.access_reject
 	}

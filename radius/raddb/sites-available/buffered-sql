@@ -1,0 +1,26 @@
+# Reads the accounting spool written by sites-available/default (module sql_spool) and
+# stores each record in PostgreSQL. If the database is down, the record stays in the spool
+# and is retried every retry_interval seconds, so no accounting is lost.
+server buffered-sql {
+	listen {
+		type = detail
+		filename = "${radacctdir}/spool/detail-*"
+		load_factor = 10
+		poll_interval = 1
+		retry_interval = 30
+	}
+
+	preacct {
+		acct_unique
+	}
+
+	accounting {
+		sql
+		# "noop" means no row needed changing (for example Accounting-On with no open sessions).
+		# The reader retries every record that does not end in ok, so it would stall on such a
+		# record forever. A real database error ("fail") is still retried.
+		if (noop) {
+			ok
+		}
+	}
+}

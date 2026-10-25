@@ -138,6 +138,7 @@ section { scroll-margin-top: 12px; }
     <li><a href="#policy">Authorization policy</a></li>
     <li><a href="#accounting">Accounting</a></li>
     <li><a href="#pla">phpLDAPadmin</a></li>
+    <li><a href="#portal">Self-service portal</a></li>
     <li><a href="#tests">Test suite</a></li>
     <li><a href="#scripts">PowerShell scripts</a></li>
     <li><a href="#nat">The Docker NAT problem</a></li>
@@ -150,14 +151,14 @@ section { scroll-margin-top: 12px; }
 
 <main>
 <header class="hero">
-  <div class="eyebrow">Networking Project · aaa-server/ · commit 55e705f</div>
+  <div class="eyebrow">Networking Project · aaa-server/</div>
   <h1>Campus Wi-Fi AAA Lab</h1>
   <p class="lede">A personal Wi-Fi login for every student, built with OpenLDAP and FreeRADIUS in Docker. This page explains the whole system: how one login travels through it, and what every file in the repository does.</p>
   <div class="chips">
-    <span class="chip ok">28 / 28 end-to-end tests pass</span>
+    <span class="chip ok">59 end-to-end + 33 portal + 8 password-store tests pass</span>
     <span class="chip">FreeRADIUS 3.2.10</span>
     <span class="chip">OpenLDAP 2.5.13</span>
-    <span class="chip">PEAP-MSCHAPv2 + EAP-TTLS/PAP</span>
+    <span class="chip">EAP-TTLS/PAP first; PEAP optional</span>
     <span class="chip">UDP 1812 / 1813</span>
     <span class="chip warn">AP: DIR-X6060 Enterprise support unconfirmed</span>
   </div>
@@ -184,7 +185,7 @@ section { scroll-margin-top: 12px; }
 <!-- 2 -->
 <section id="architecture">
   <h2><span class="num">02</span>Architecture</h2>
-  <p class="summary">Four containers on one Windows PC. Only FreeRADIUS is reachable from the network.</p>
+  <p class="summary">The services run on one Windows PC. Only FreeRADIUS is reachable from the network.</p>
   <figure>
     <div class="diagram"><pre class="mermaid">
 flowchart LR
@@ -197,20 +198,29 @@ flowchart LR
     R["radius · 10.89.0.20<br/>FreeRADIUS 3.2.10"]
     D["ldap · 10.89.0.10<br/>OpenLDAP slapd"]
     A["ldapadmin · 10.89.0.30<br/>phpLDAPadmin"]
+    DB[("postgres · 10.89.0.40<br/>accounting database")]
+    M["maintenance<br/>reaper and retention"]
+    PO["portal · 10.89.0.60<br/>self-service"]
     T["tests · 10.89.0.50<br/>eapol_test, radclient"]
-    V[("radius-acct volume<br/>SQLite + detail files")]
+    V[("radius-acct volume<br/>detail files + spool")]
   end
   ADM["Admin browser<br/>127.0.0.1:8080"]
+  USR["User browser<br/>127.0.0.1:8081"]
   L -- "EAPOL (EAP over Wi-Fi)" --> AP
   P -- "EAPOL" --> AP
   AP -- "RADIUS UDP 1812 auth<br/>UDP 1813 acct" --> R
   R -- "LDAP 389" --> D
   R --> V
+  R --> DB
+  M --> DB
+  PO --> D
+  PO --> DB
   A -- "LDAP 389" --> D
   ADM --> A
+  USR --> PO
   T -. "test traffic" .-> R
 </pre></div>
-    <figcaption>Figure 1. Components and protocols. The <code>ldap</code> service has no published port. phpLDAPadmin is published only on <code>127.0.0.1</code>, so other machines cannot reach it.</figcaption>
+    <figcaption>Figure 1. Components and protocols. The <code>ldap</code> and <code>postgres</code> services have no published ports. phpLDAPadmin and the portal are published only on <code>127.0.0.1</code>.</figcaption>
   </figure>
   <p>Each protocol covers one hop:</p>
   <ul>
@@ -224,7 +234,7 @@ flowchart LR
 <!-- 3 -->
 <section id="login">
   <h2><span class="num">03</span>One login, step by step</h2>
-  <p class="summary">A PEAP-MSCHAPv2 login by <code>faculty001</code>, as the test suite runs it.</p>
+  <p class="summary">An EAP-TTLS/PAP login by <code>faculty001</code>, the default method.</p>
   <figure>
     <div class="diagram"><pre class="mermaid">
 sequenceDiagram
@@ -236,16 +246,16 @@ sequenceDiagram
   participant D as OpenLDAP
   S->>AP: EAP-Response/Identity "anonymous"
   AP->>O: Access-Request (EAP-Message)
-  O-->>AP: Access-Challenge: start PEAP
+  O-->>AP: Access-Challenge: start EAP-TTLS
   Note over S,O: TLS handshake over several challenge rounds. The device checks the server certificate against ca.pem and the name radius.nitsrinagar.lab
   S->>O: inside TLS: real identity "faculty001"
   O->>I: tunneled request, User-Name = faculty001
   I->>D: search (uid=faculty001) as cn=radius
-  D-->>I: DN + sambaNTPassword
-  I->>I: mschap verifies the MSCHAPv2 response with the NT hash
+  D-->>I: DN
+  I->>D: LDAP bind as the user with the tunneled password
   I->>D: group search (member = user DN)
   D-->>I: cn=faculty
-  I->>I: campus_authorize: Session-Timeout 43200, VLAN 20, Class "faculty"
+  I->>I: campus_authorize: Session-Timeout REAUTH_INTERVAL, VLAN 20, Class "faculty"
   I-->>O: inner accept, result stored in outer.session-state
   O-->>AP: Access-Accept + User-Name, Session-Timeout, Tunnel-*, Class, MPPE keys
   AP-->>S: EAP-Success, 4-way handshake, port opens
@@ -269,7 +279,7 @@ sequenceDiagram
     <thead><tr><th class="num">No.</th><th>Attribute</th><th>Example</th><th>Purpose</th></tr></thead>
     <tbody>
       <tr><td class="num">1</td><td><code>User-Name</code></td><td>faculty001</td><td>Real identity. The AP reuses it in accounting instead of "anonymous".</td></tr>
-      <tr><td class="num">27</td><td><code>Session-Timeout</code></td><td>43200</td><td>Seconds until the AP must re-authenticate the device</td></tr>
+      <tr><td class="num">27</td><td><code>Session-Timeout</code></td><td><code>REAUTH_INTERVAL</code></td><td>Seconds until the AP must re-authenticate the device</td></tr>
       <tr><td class="num">64</td><td><code>Tunnel-Type</code></td><td>VLAN (13)</td><td>Dynamic VLAN assignment, part 1</td></tr>
       <tr><td class="num">65</td><td><code>Tunnel-Medium-Type</code></td><td>IEEE-802 (6)</td><td>Dynamic VLAN assignment, part 2</td></tr>
       <tr><td class="num">81</td><td><code>Tunnel-Private-Group-Id</code></td><td>"20"</td><td>The VLAN number</td></tr>
@@ -286,7 +296,7 @@ sequenceDiagram
     <div>
       <h4>Authentication</h4>
       <div class="q">Who are you?</div>
-      <p>PEAP-MSCHAPv2 checks the NT hash from LDAP. EAP-TTLS/PAP binds to LDAP as the user.</p>
+      <p>EAP-TTLS/PAP is the default and binds to LDAP as the user. PEAP-MSCHAPv2 uses an NT hash only while <code>ALLOW_PEAP=yes</code>.</p>
       <p><code>mods-available/eap</code>, <code>mods-available/ldap</code>, <code>sites-available/inner-tunnel</code></p>
     </div>
     <div>
@@ -298,8 +308,8 @@ sequenceDiagram
     <div>
       <h4>Accounting</h4>
       <div class="q">What happened?</div>
-      <p>Start, Interim-Update and Stop records go to SQLite <code>radacct</code> and to daily detail files. Login attempts go to <code>radpostauth</code>.</p>
-      <p><code>mods-available/sql</code>, <code>accounting { detail sql }</code></p>
+      <p>Start, Interim-Update and Stop records are spooled, then stored in PostgreSQL <code>radacct</code>. Daily detail files keep the original packets. Login attempts go to <code>radpostauth</code>.</p>
+      <p><code>mods-available/sql_spool</code>, <code>sites-available/buffered-sql</code></p>
     </div>
   </div>
 </section>
@@ -307,27 +317,31 @@ sequenceDiagram
 <!-- 5 -->
 <section id="repo">
   <h2><span class="num">05</span>Repository map</h2>
-  <p class="summary">24 committed files, about 1,280 lines. Secrets and keys are git-ignored.</p>
-  <div class="code"><div class="file">aaa-server/</div><pre>docker-compose.yml          <span class="c"># 4 services, fixed network 10.89.0.0/24, 5 volumes</span>
+  <p class="summary">The lab services, policy, database setup and portal live here. Secrets and keys are git-ignored.</p>
+  <div class="code"><div class="file">aaa-server/</div><pre>docker-compose.yml          <span class="c"># services, fixed network 10.89.0.0/24, volumes</span>
 .env.example                <span class="c"># template; init.ps1 writes .env with random secrets</span>
 .gitignore / .gitattributes <span class="c"># ignore .env and certs/*; force LF for Linux files</span>
 README.md                   <span class="c"># lab guide</span>
 ldap/
   Dockerfile                <span class="c"># Debian slapd + Samba schema</span>
   entrypoint.sh             <span class="c"># first start: config, ACLs, base tree, seed users</span>
-  add-user.sh               <span class="c"># create a user with SSHA + NT hash, add to groups</span>
+  add-user.sh               <span class="c"># create a user with {ARGON2}; NT hash only while PEAP is allowed</span>
   seed/users.txt            <span class="c"># 6 test users</span>
 radius/
   Dockerfile                <span class="c"># official FreeRADIUS image + our 7 files</span>
   radius-start.sh           <span class="c"># install certs with safe ownership, then start</span>
   raddb/clients.conf        <span class="c"># who may send RADIUS (NAS list)</span>
-  raddb/mods-available/{ldap,eap,sql}
-  raddb/sites-available/{default,inner-tunnel}
-  raddb/policy.d/campus     <span class="c"># group → session limit / VLAN / reject</span>
+  raddb/mods-available/{ldap,eap,sql,sql_spool}
+  raddb/sites-available/{default,inner-tunnel,buffered-sql}
+  raddb/policy.d/campus     <span class="c"># access, device and reject-rate rules</span>
+postgres/
+  initdb/                   <span class="c"># PostgreSQL schema, partitions and service roles</span>
+  maintenance.sh            <span class="c"># reaper, retention and device expiry</span>
+portal/                     <span class="c"># Flask self-service portal and tests</span>
 certs/make-certs.sh         <span class="c"># lab CA + server certificate</span>
-tests/Dockerfile, run-tests.sh   <span class="c"># 28-check end-to-end suite</span>
+tests/Dockerfile, run-tests.sh   <span class="c"># end-to-end suite</span>
 scripts/init.ps1, test.ps1, acct.ps1</pre></div>
-  <p>The FreeRADIUS image ships about 200 config files. The project replaces only 7 of them. Everything else stays stock, so you can read the difference from upstream at a glance.</p>
+  <p>The FreeRADIUS image ships many configuration files. The project changes only the files needed for the lab policy, LDAP, PostgreSQL and buffered accounting.</p>
 </section>
 
 <!-- 6 -->
@@ -340,7 +354,11 @@ scripts/init.ps1, test.ps1, acct.ps1</pre></div>
       <tr><td><code>ldap</code></td><td><code>./ldap</code></td><td class="num">10.89.0.10</td><td>none</td><td><code>ldap-config</code>, <code>ldap-data</code></td></tr>
       <tr><td><code>radius</code></td><td><code>./radius</code></td><td class="num">10.89.0.20</td><td>1812/udp, 1813/udp on all interfaces</td><td><code>./certs</code> (read-only), <code>radius-acct</code></td></tr>
       <tr><td><code>ldapadmin</code></td><td><code>phpldapadmin/phpldapadmin:2.3.11</code></td><td class="num">10.89.0.30</td><td>127.0.0.1:8080 only</td><td><code>pla-sessions</code>, <code>pla-logs</code></td></tr>
+      <tr><td><code>postgres</code></td><td><code>postgres:17.6-bookworm</code></td><td class="num">10.89.0.40</td><td>none</td><td><code>pg-data</code></td></tr>
+      <tr><td><code>maintenance</code></td><td><code>postgres:17.6-bookworm</code></td><td class="num">dynamic</td><td>none</td><td>none</td></tr>
+      <tr><td><code>portal</code></td><td><code>./portal</code></td><td class="num">10.89.0.60</td><td>127.0.0.1:8081 only</td><td>none</td></tr>
       <tr><td><code>tests</code></td><td><code>./tests</code> (profile <code>test</code>)</td><td class="num">10.89.0.50</td><td>none</td><td><code>ca.pem</code>, <code>radius-acct</code> (read-only)</td></tr>
+      <tr><td><code>portal-test</code>, <code>tools</code></td><td>profiles <code>test</code>, <code>tools</code></td><td class="num">dynamic</td><td>none</td><td>none</td></tr>
     </tbody>
   </table></div>
   <h4>Design decisions</h4>
@@ -348,7 +366,7 @@ scripts/init.ps1, test.ps1, acct.ps1</pre></div>
     <li><strong>Fixed subnet <code>10.89.0.0/24</code>.</strong> Your campus LAN is <code>172.17.28.0</code>, which overlaps Docker's default <code>172.17.0.0/16</code>. A fixed subnet avoids that conflict.</li>
     <li><strong>Fixed IPs.</strong> <code>clients.conf</code> identifies the test runner by <code>10.89.0.50</code>, so its address must not change.</li>
     <li><strong>Explicit environment lists.</strong> Each service gets only the secrets it needs. For example, <code>ldap</code> never sees the RADIUS shared secrets.</li>
-    <li><strong>Health-gated start.</strong> <code>radius</code> and <code>ldapadmin</code> wait until <code>ldap</code> is <code>service_healthy</code>. The health check is an anonymous rootDSE search.</li>
+    <li><strong>Health-gated start.</strong> Services that need LDAP or PostgreSQL wait for the relevant service to become healthy.</li>
     <li><strong>Test profile.</strong> <code>tests</code> starts only with <code>--profile test</code>, so <code>docker compose up</code> does not run it.</li>
   </ul>
 </section>
@@ -384,7 +402,7 @@ flowchart TD
 </pre></div>
     <figcaption>Figure 3. The temporary slapd listens only on the local socket <code>ldapi:///</code>, so nobody on the network can reach a half-built directory.</figcaption>
   </figure>
-  <p>The generated <code>cn=config</code> loads five schemas: <code>core</code>, <code>cosine</code>, <code>nis</code>, <code>inetorgperson</code> and <code>samba</code>. It defines one MDB database for <code>dc=nitsrinagar,dc=edu</code>, with indexes on <code>objectClass</code>, <code>uid</code>, <code>member</code> and <code>cn</code>. The admin password is stored only as a <code>{SSHA}</code> hash in <code>olcRootPW</code>.</p>
+  <p>The generated <code>cn=config</code> loads five schemas: <code>core</code>, <code>cosine</code>, <code>nis</code>, <code>inetorgperson</code> and <code>samba</code>. It defines one MDB database for <code>dc=nitsrinagar,dc=edu</code>, with indexes on <code>objectClass</code>, <code>uid</code>, <code>member</code> and <code>cn</code>.</p>
 
   <h3>Access control (olcAccess)</h3>
   <p>LDAP checks rules in order, and the first rule whose target matches decides. <code>ROOT_PEER</code> is the identity of the root user over the local socket; scripts inside the container use it, with no password.</p>
@@ -392,7 +410,7 @@ flowchart TD
     <thead><tr><th class="num">#</th><th>Target</th><th>Who gets what</th><th>Why</th></tr></thead>
     <tbody>
       <tr><td class="num">{0}</td><td><code>userPassword</code></td><td>root: manage · anonymous: <em>auth</em> only · others: none</td><td>Anyone can bind (log in), nobody can read the hash</td></tr>
-      <tr><td class="num">{1}</td><td><code>sambaNTPassword</code>, <code>sambaLMPassword</code></td><td>root: manage · <code>cn=radius</code>: read · others: none</td><td>Only FreeRADIUS needs the NT hash, for MSCHAPv2</td></tr>
+      <tr><td class="num">{1}</td><td><code>sambaNTPassword</code>, <code>sambaLMPassword</code></td><td>root: manage · <code>cn=radius</code>: read · self: delete · others: none</td><td>Only FreeRADIUS needs the NT hash, for PEAP while it is allowed. A user can remove their own hash during a password change.</td></tr>
       <tr><td class="num">{2}</td><td><code>cn=admin</code> entry: <code>entry</code>, <code>objectClass</code>, <code>cn</code></td><td>anonymous: read · others: continue to the next rule</td><td>phpLDAPadmin looks up the login entry before it binds</td></tr>
       <tr><td class="num">{3}</td><td>everything else</td><td>root: manage · <code>cn=radius</code>: read · self: read · others: none</td><td>Anonymous users cannot list the directory. Users see only their own entry.</td></tr>
     </tbody>
@@ -421,22 +439,19 @@ flowchart TD
   GR --> g4["cn=guests"]
   GR --> g5["cn=disabled"]
   SV --> svc["cn=radius<br/>read-only bind account"]
+  SV --> portal["cn=portal<br/>no password hashes"]
 </pre></div>
     <figcaption>Figure 4. <code>disabled001</code> is a member of both <code>cn=students</code> and <code>cn=disabled</code>. The tests use it to prove that "disabled" wins.</figcaption>
   </figure>
 
-  <h3>ldap/add-user.sh — one user, two hashes</h3>
-  <p>Each user entry has two object classes: <code>inetOrgPerson</code> (name, mail, password) and <code>sambaSamAccount</code> (NT hash). The script computes both hashes from one password:</p>
-  <div class="code"><div class="file">ldap/add-user.sh (excerpt)</div><pre>ssha=$(slappasswd -h '{SSHA}' -s "$password")
-nt_hash=$(printf '%s' "$password" | iconv -f UTF-8 -t UTF-16LE \
-    | openssl dgst -md4 -provider default -provider legacy | awk '{print toupper($NF)}')</pre></div>
+  <h3>ldap/add-user.sh — password storage</h3>
+  <p>Each user entry has <code>inetOrgPerson</code> for name, mail and password. Passwords use <code>{ARGON2}</code>. The script adds <code>sambaSamAccount</code> and its NT hash only while <code>ALLOW_PEAP=yes</code>.</p>
   <ul>
-    <li><code>{SSHA}</code> is salted SHA-1. EAP-TTLS/PAP uses it, because FreeRADIUS sends the plain password to LDAP as a bind.</li>
-    <li>The NT hash is MD4 of the UTF-16LE password. MSCHAPv2 is a challenge-response method, so the server must hold this hash. OpenSSL 3 keeps MD4 in its <code>legacy</code> provider. The function was checked against the known vector: NT hash of <code>password</code> = <code>8846F7EAEE8FB117AD06BDD830B7586C</code>.</li>
-    <li><code>sambaSamAccount</code> requires a <code>sambaSID</code>. The script uses a fixed lab domain <code>S-1-5-21-1000-2000-3000</code> plus RID <code>1001 + count of existing accounts</code>.</li>
-    <li>Groups are <code>groupOfNames</code>, which must have at least one member. So the script creates a group when its first member arrives, and modifies it after that.</li>
-    <li>The password comes from <code>$NEW_USER_PASSWORD</code>. If that is empty, the script generates one and prints it once. It is never a command-line argument, so it does not appear in shell history or the process list.</li>
+    <li>TTLS/PAP sends the password inside its TLS tunnel. FreeRADIUS checks it with an LDAP bind, so it does not read the password hash.</li>
+    <li>The NT hash is an unsalted MD4 value used by PEAP-MSCHAPv2. It is password-equivalent and is removed after a self-service password change.</li>
+    <li>Existing <code>{SSHA}</code> user hashes remain until the user changes their password. They cannot be converted without the password.</li>
   </ul>
+  <p>The password check is an LDAP bind, and nothing else. See <a href="decisions/0002-ldap-only.md"><code>docs/decisions/0002-ldap-only.md</code></a>. The stored LDAP uid is used for accounting and both limits, so changing the case of a login name cannot bypass them.</p>
 </section>
 
 <!-- 8 -->
@@ -466,12 +481,12 @@ flowchart LR
     <li>Copies the 7 config files over the stock ones.</li>
     <li>Enables the <code>ldap</code> and <code>sql</code> modules with symlinks in <code>mods-enabled/</code>.</li>
     <li>Sets <code>auth = yes</code> in <code>radiusd.conf</code>, so every accept and reject is logged with its reason. The password is never logged.</li>
-    <li>Turns on the <code>class</code> column in the stock SQLite queries, with <code>%{string:&amp;Class}</code> so the group name is stored as text, not hex.</li>
+    <li>Uses PostgreSQL queries, including <code>radacct_claims</code> for duplicate-safe accounting inserts, and stores <code>Class</code> as text.</li>
     <li>Starts with <code>-l stdout</code>, so <code>docker compose logs radius</code> shows the server log.</li>
   </ul>
 
   <h3>radius/radius-start.sh</h3>
-  <p>The certificates arrive from the Windows folder, where Linux file ownership has no meaning. The script copies them to <code>/etc/freeradius/certs/lab</code> and gives the private key owner <code>root:freerad</code> and mode <code>0640</code>, because FreeRADIUS runs as user <code>freerad</code>. It also creates the <code>sqlite/</code> and <code>radacct/</code> folders. Then it calls the image's normal entrypoint.</p>
+  <p>The certificates arrive from the Windows folder, where Linux file ownership has no meaning. The script copies them to <code>/etc/freeradius/certs/lab</code> and gives the private key owner <code>root:freerad</code> and mode <code>0640</code>, because FreeRADIUS runs as user <code>freerad</code>. It also creates the accounting folders for detail files and the spool. Then it calls the image's normal entrypoint.</p>
 
   <h3>raddb/clients.conf — who may talk to the server</h3>
   <div class="table-wrap"><table>
@@ -501,20 +516,20 @@ group {
   <ul>
     <li><strong>Lookup:</strong> binds as the read-only <code>cn=radius</code> account and searches by <code>uid</code>. FreeRADIUS escapes the user name, so LDAP filter injection is not possible.</li>
     <li><strong>NT hash:</strong> copies <code>sambaNTPassword</code> into <code>control:NT-Password</code> for <code>mschap</code>.</li>
-    <li><strong>Password check for PAP/TTLS:</strong> <code>Auth-Type LDAP</code> binds as the user's DN with the given password. FreeRADIUS never sees the SSHA hash.</li>
+    <li><strong>Password check for PAP/TTLS:</strong> <code>Auth-Type LDAP</code> binds as the user's DN with the given password. FreeRADIUS never reads the password hash.</li>
     <li><strong>Groups:</strong> <code>membership_filter</code> searches <code>ou=Groups</code> for groups whose <code>member</code> is the user. This makes the <code>LDAP-Group == "faculty"</code> check work without a <code>memberOf</code> overlay.</li>
   </ul>
 
   <h3>raddb/mods-available/eap</h3>
   <ul>
-    <li><code>default_eap_type = peap</code>. The <code>ttls</code> and <code>peap</code> sub-modules both send the inner request to <code>virtual_server = "inner-tunnel"</code>.</li>
+    <li><code>default_eap_type = ttls</code>. The <code>ttls</code> and <code>peap</code> sub-modules both send the inner request to <code>virtual_server = "inner-tunnel"</code>.</li>
     <li>Only <code>peap</code>, <code>ttls</code> and <code>mschapv2</code> are loaded. MD5, GTC and LEAP are left out because they are weak.</li>
     <li>TLS: our lab certificates, <code>tls_min_version = "1.2"</code>, <code>tls_max_version = "1.2"</code> (TLS 1.3 inside PEAP/TTLS is still unreliable on many clients), cipher list <code>HIGH:!aNULL:!MD5:!RC4:!3DES</code>.</li>
     <li><code>use_tunneled_reply = no</code>. The inner result goes out through <code>session-state</code> instead (see section 10).</li>
   </ul>
 
   <h3>raddb/mods-available/sql</h3>
-  <p>The <code>sql</code> module is used only for accounting and the post-auth log. It never looks up users; LDAP is the only identity store. Driver <code>rlm_sql_sqlite</code>, database <code>${logdir}/sqlite/radius.db</code>. The <code>bootstrap</code> option creates the standard schema the first time.</p>
+  <p>The <code>sql</code> module uses PostgreSQL for accounting, the post-auth log and limit queries. It never looks up users; LDAP is the only identity store. The <code>sql_spool</code> module queues accounting packets for the <code>buffered-sql</code> server, so a database outage delays records instead of losing them.</p>
   <div class="code"><div class="file">radius/raddb/mods-available/sql (excerpt)</div><pre><span class="c"># Log the real (inner) identity, not the anonymous outer identity of PEAP/TTLS</span>
 sql_user_name = "%{%{reply:User-Name}:-%{%{session-state:User-Name}:-%{User-Name}}}"</pre></div>
   <p>The fallback chain reads: use the reply's User-Name if there is one (an accept), else the inner identity saved in session-state (a reject inside the tunnel), else the request's User-Name (plain PAP and accounting).</p>
@@ -530,8 +545,8 @@ flowchart TD
   IN(["Access-Request from NAS"]) --> AZ["default: authorize<br/>filter_username, preprocess"]
   AZ --> E{"EAP-Message?"}
   E -- "yes" --> EAP["eap module: TLS rounds<br/>returns Access-Challenge"]
-  E -- "no (radtest PAP)" --> LP["ldap lookup<br/>Auth-Type := LDAP (bind)"]
-  EAP -- "TLS ready, tunneled data" --> IT["inner-tunnel: authorize<br/>mschap, eap, ldap, pap"]
+  E -- "no (radtest PAP)" --> LP["LDAP lookup + password backend"]
+  EAP -- "TLS ready, tunneled data" --> IT["inner-tunnel: authorize<br/>PEAP gate, ldap, backend, rate limit"]
   IT --> AU{"authenticate"}
   AU -- "PEAP" --> MS["Auth-Type MS-CHAP<br/>NT hash from LDAP"]
   AU -- "TTLS" --> LB["Auth-Type LDAP<br/>bind as the user"]
@@ -542,7 +557,7 @@ flowchart TD
   SS --> OPA["default post-auth:<br/>reply := session-state values"]
   LP --> PAP["default post-auth: campus_authorize"]
   PAP --> OPA
-  OPA --> SQL["sql: row in radpostauth"]
+  OPA --> SQL["PostgreSQL: row in radpostauth"]
   SQL --> OUT(["Access-Accept"])
 </pre></div>
     <figcaption>Figure 6. Plain PAP from <code>radtest</code> runs the policy in the outer server. EAP logins run it in the inner tunnel.</figcaption>
@@ -553,8 +568,8 @@ flowchart TD
     <li><strong>listen:</strong> auth and acct on all addresses. <code>port = 0</code> means the standard ports, 1812 and 1813.</li>
     <li><strong>authorize:</strong> <code>eap { ok = return }</code> stops early while an EAP conversation is in progress. LDAP is called only when there is no <code>EAP-Message</code>, so the server does not look up "anonymous" on every TLS round.</li>
     <li><strong>authenticate:</strong> <code>Auth-Type LDAP</code> (bind) for PAP, <code>eap</code> for everything else.</li>
-    <li><strong>preacct / accounting:</strong> <code>acct_unique</code> builds a stable session key. Then the <code>detail</code> and <code>sql</code> modules write the record.</li>
-    <li><strong>post-auth:</strong> copies the six authorization attributes from session-state into the reply with <code>:=</code>, logs to SQL, and removes <code>Reply-Message</code> for EAP. Some clients reject an EAP packet that carries one.</li>
+    <li><strong>preacct / accounting:</strong> <code>acct_unique</code> builds a stable session key. <code>detail</code> keeps the original packet, server receive time replaces the AP timestamp for PostgreSQL, and <code>sql_spool</code> queues the record.</li>
+    <li><strong>post-auth:</strong> copies authorization attributes from session-state into the reply with <code>:=</code>, logs to SQL, and removes <code>Reply-Message</code> for EAP. Some clients reject an EAP packet that carries one.</li>
   </ul>
   <div class="code"><div class="file">radius/raddb/sites-available/default — post-auth</div><pre>update reply {
 	&amp;User-Name := &amp;session-state:User-Name
@@ -573,17 +588,15 @@ eap {
 	ok = return
 }
 ldap
-if ((ok || updated) &amp;&amp; User-Password &amp;&amp; !control:Auth-Type) {
-	update control {
-		&amp;Auth-Type := ldap
-	}
-}
+password_check
+reject_rate_limit
 <span class="c"># Converts the hex NT hash from LDAP to binary, as mschap needs. Auth-Type is already set above.</span>
 pap</pre></div>
   <ul>
     <li><code>mschap</code> sets <code>Auth-Type MS-CHAP</code> when MS-CHAP attributes are present (PEAP).</li>
-    <li><code>ldap</code> finds the user and loads the NT hash.</li>
-    <li>When there is a plain <code>User-Password</code> (TTLS/PAP), the <code>if</code> block selects an LDAP bind.</li>
+    <li><code>ldap</code> finds the user and stores the canonical uid for accounting and limits.</li>
+    <li><code>password_check</code> sets <code>Auth-Type LDAP</code>, so slapd checks the password with a bind against the <code>{ARGON2}</code> hash.</li>
+    <li><code>reject_rate_limit</code> applies the per-user, per-device reject limit before another password check.</li>
     <li><code>pap</code> runs last only to convert the 32-character hex NT hash into 16 bytes. Without it, MSCHAPv2 failed; see <a href="#bugs">section 17</a>.</li>
   </ul>
   <p>In <strong>post-auth</strong>, the inner server runs <code>campus_authorize</code> and then hands the result to the outer server. This is needed because the outer and inner requests are separate. For PEAP, the final Access-Accept is sent one round later than the inner accept, and <code>session-state</code> survives between rounds through the RADIUS <code>State</code> attribute.</p>
@@ -599,13 +612,13 @@ flowchart TD
   S(["password verified"]) --> D{"member of cn=disabled?"}
   D -- yes --> R1(["Reject: Account disabled"])
   D -- no --> F{"faculty?"}
-  F -- yes --> AF["12 h · VLAN 20 · Class faculty"]
+  F -- yes --> AF["re-check interval · VLAN 20 · Class faculty"]
   F -- no --> T{"staff?"}
-  T -- yes --> AT["12 h · VLAN 20 · Class staff"]
+  T -- yes --> AT["re-check interval · VLAN 20 · Class staff"]
   T -- no --> U{"students?"}
-  U -- yes --> AU["8 h · VLAN 10 · Class students"]
+  U -- yes --> AU["re-check interval · VLAN 10 · Class students"]
   U -- no --> G{"guests?"}
-  G -- yes --> AG["2 h · VLAN 30 · Class guests"]
+  G -- yes --> AG["re-check interval · VLAN 30 · Class guests"]
   G -- no --> R2(["Reject: No Wi-Fi access group"])
 </pre></div>
     <figcaption>Figure 7. The order matters: "disabled" is checked first, so it overrides every other group.</figcaption>
@@ -614,16 +627,16 @@ flowchart TD
     <thead><tr><th>Group</th><th>Result</th><th class="num">Session-Timeout</th><th class="num">VLAN</th><th>Class</th></tr></thead>
     <tbody>
       <tr><td><code>disabled</code></td><td><span class="pill reject">Reject</span></td><td class="num">—</td><td class="num">—</td><td>—</td></tr>
-      <tr><td><code>faculty</code></td><td><span class="pill accept">Accept</span></td><td class="num">43200</td><td class="num">20</td><td>faculty</td></tr>
-      <tr><td><code>staff</code></td><td><span class="pill accept">Accept</span></td><td class="num">43200</td><td class="num">20</td><td>staff</td></tr>
-      <tr><td><code>students</code></td><td><span class="pill accept">Accept</span></td><td class="num">28800</td><td class="num">10</td><td>students</td></tr>
-      <tr><td><code>guests</code></td><td><span class="pill accept">Accept</span></td><td class="num">7200</td><td class="num">30</td><td>guests</td></tr>
+      <tr><td><code>faculty</code></td><td><span class="pill accept">Accept</span></td><td class="num"><code>REAUTH_INTERVAL</code></td><td class="num">20</td><td>faculty</td></tr>
+      <tr><td><code>staff</code></td><td><span class="pill accept">Accept</span></td><td class="num"><code>REAUTH_INTERVAL</code></td><td class="num">20</td><td>staff</td></tr>
+      <tr><td><code>students</code></td><td><span class="pill accept">Accept</span></td><td class="num"><code>REAUTH_INTERVAL</code></td><td class="num">10</td><td>students</td></tr>
+      <tr><td><code>guests</code></td><td><span class="pill accept">Accept</span></td><td class="num"><code>REAUTH_INTERVAL</code></td><td class="num">30</td><td>guests</td></tr>
       <tr><td>no group</td><td><span class="pill reject">Reject</span></td><td class="num">—</td><td class="num">—</td><td>—</td></tr>
     </tbody>
   </table></div>
   <div class="code"><div class="file">radius/raddb/policy.d/campus (one branch)</div><pre>elsif (LDAP-Group == "students") {
 	update reply {
-		&amp;Session-Timeout := 28800
+	&amp;Session-Timeout := $ENV{REAUTH_INTERVAL}
 		&amp;Tunnel-Type := VLAN
 		&amp;Tunnel-Medium-Type := IEEE-802
 		&amp;Tunnel-Private-Group-Id := "10"
@@ -631,39 +644,53 @@ flowchart TD
 		&amp;Reply-Message := "Welcome, student."
 	}
 }</pre></div>
-  <p><code>LDAP-Group</code> is a virtual attribute from the <code>ldap</code> module. Each comparison runs the group search from section 9.</p>
+  <p><code>LDAP-Group</code> is a virtual attribute from the <code>ldap</code> module. Each comparison runs the group search from section 9. Every accepted user also receives <code>Termination-Action = RADIUS-Request</code> and <code>Acct-Interim-Interval</code>; together these support re-checking, accounting and the device limit.</p>
   <p>The DIR-X6060 is a consumer router, so it will probably ignore the three <code>Tunnel-*</code> attributes. The VLAN part then has no effect. The rejects, <code>Session-Timeout</code> and <code>Class</code> still work.</p>
 </section>
 
 <!-- 12 -->
 <section id="accounting">
   <h2><span class="num">12</span>Accounting</h2>
-  <p class="summary">Every session is recorded twice: in a queryable database and in plain text.</p>
+  <p class="summary">Every session has a queryable PostgreSQL copy and a plain-text copy. A spool keeps accounting records through a database outage.</p>
   <figure>
     <div class="diagram"><pre class="mermaid">
 sequenceDiagram
   participant AP as AP
   participant R as FreeRADIUS
-  participant DB as SQLite radacct
+  participant S as buffered-sql spool
+  participant DB as PostgreSQL radacct
   participant F as detail file
   AP->>R: Accounting-Request Start (Acct-Session-Id, User-Name, Class)
   R->>R: preacct: acct_unique builds Acct-Unique-Session-Id
   R->>F: append record
-  R->>DB: INSERT row
+  R->>R: replace Event-Timestamp with server receive time
+  R->>S: queue record
+  S->>DB: duplicate-safe insert or update
   R-->>AP: Accounting-Response
   AP->>R: Interim-Update (time, bytes so far)
-  R->>DB: UPDATE row
+  R->>S: queue update
   AP->>R: Stop (final time, bytes, terminate cause)
-  R->>DB: UPDATE row, set acctstoptime
+  R->>S: queue stop
 </pre></div>
     <figcaption>Figure 8. The AP must get an Accounting-Response. If it does not, it re-sends the packet.</figcaption>
   </figure>
   <ul>
-    <li><strong>SQLite</strong>: <code>/var/log/freeradius/sqlite/radius.db</code> in volume <code>radius-acct</code>. Table <code>radacct</code> holds sessions; table <code>radpostauth</code> holds every accept and reject, with the real user name and the group.</li>
+    <li><strong>PostgreSQL</strong>: <code>radacct</code> holds sessions and <code>radpostauth</code> holds accepts and rejects without passwords. Both use monthly partitions. The maintenance service keeps 12 months.</li>
     <li><strong>Detail files</strong>: <code>radacct/&lt;source-ip&gt;/detail-YYYYMMDD</code>, one text record per packet.</li>
-    <li><strong>Why SQLite</strong>: no extra database server, which keeps the "no PostgreSQL" decision. A later Spring Boot dashboard can still read it with SQL.</li>
+    <li><strong>Buffered SQL</strong>: FreeRADIUS writes each packet to its spool before PostgreSQL receives it. When PostgreSQL is unavailable, the records wait and retry; logins continue to work.</li>
+    <li><strong>Trusted time</strong>: the database uses the server receive time minus <code>Acct-Delay-Time</code>. The unmodified AP time remains in the detail file.</li>
+    <li><strong>Duplicate safety</strong>: <code>radacct_claims</code> makes spooled inserts safe when an AP re-sends a packet.</li>
   </ul>
-  <p><code>scripts/acct.ps1</code> shows the last 20 sessions. It opens the database with <code>?immutable=1</code> from the tests image, so it can never change the data.</p>
+  <p>The maintenance service closes stale sessions, creates future partitions, removes partitions beyond the 12-month retention period and expires old device records. <code>scripts/acct.ps1</code> reports sessions, authentication events and devices from PostgreSQL. The previous SQLite file is no longer used.</p>
+  <p><strong>Who had this IP?</strong> <code>scripts/who-had-ip.ps1 -Ip &lt;IPv4&gt; -At "&lt;time&gt;"</code> answers the incident question (CERT-In: within hours) from <code>radacct</code>: user, device MAC, access point and session for that address at that moment. A time without an offset is read as India time (+05:30). It works only for devices whose AP sends <code>Framed-IP-Address</code>; for a real incident it must be joined with DHCP leases and NAT port-block logs (README section 5, "Log chain").</p>
+  <h3>Device limit and failed-login rate limit</h3>
+  <p>Students have a limit of <code>DEVICE_LIMIT_STUDENTS</code> devices: the lab value is 3. FreeRADIUS counts distinct live MAC addresses with an open, recently updated session, excluding the MAC now logging in. It uses the uid stored in LDAP for the count, not the typed spelling, so a case change cannot bypass the limit.</p>
+  <ul>
+    <li><code>DEVICE_LIMIT_MODE=soft</code> logs the event in <code>device_limit_events</code> and accepts the login.</li>
+    <li><code>DEVICE_LIMIT_MODE=enforce</code> logs the event and sends an Access-Reject.</li>
+    <li>Stale sessions stop counting after <code>STALE_SESSION_MINUTES</code>; the maintenance service marks them <code>Stale-Session-Reaped</code>. If PostgreSQL is down, the limit fails open.</li>
+  </ul>
+  <p>The lab does not lock an account after bad passwords. Instead, after <code>AUTH_REJECT_LIMIT</code> rejects for one user and one device MAC in <code>AUTH_REJECT_WINDOW</code> minutes, that device is refused before another password check. Other devices for that user still work.</p>
 </section>
 
 <!-- 13 -->
@@ -679,27 +706,36 @@ sequenceDiagram
   <p><code>LDAP_LOGIN_OBJECTCLASS: organizationalRole</code> adds a safety rule. Only the admin entry has that class, so Wi-Fi users (<code>inetOrgPerson</code>) cannot log in to the admin UI. This was tested: admin gets in, <code>student001</code> is refused.</p>
 </section>
 
+<section id="portal">
+  <h2><span class="num">13b</span>Self-service portal</h2>
+  <p class="summary">At <code>http://127.0.0.1:8081</code>, Wi-Fi users can manage their own password and devices on this PC.</p>
+  <p>A user signs in with their Wi-Fi ID and password. They can change the password, view live sessions and devices seen before, see recent device-limit events, and ask the AP to disconnect one of their devices. The portal checks that an open session belongs to the signed-in user before it sends a Disconnect-Request.</p>
+  <p>A password change uses LDAP Password Modify, and slapd stores the new <code>{ARGON2}</code> hash. Before changing the password, the portal deletes <code>sambaNTPassword</code>. Otherwise an old password could keep working through PEAP. The user must then use EAP-TTLS/PAP for PEAP devices.</p>
+  <p>The portal has separate least-privilege accounts: LDAP <code>cn=portal</code> reads entries and groups but no password hash; PostgreSQL role <code>portal</code> has SELECT access to <code>radacct</code>, <code>user_devices</code> and <code>device_limit_events</code>. It never uses <code>cn=radius</code>.</p>
+  <p><strong>Lab limits.</strong> The portal is HTTP only and bound to localhost. It uses Flask's built-in server. Its rate limits live in one process, and Docker Desktop makes the per-address limit shared by lab users. It reaches LDAP over plain <code>ldap://</code> inside the Docker network. Do not make it available to others until the promotion work listed in README section 5b is complete.</p>
+</section>
+
 <!-- 14 -->
 <section id="tests">
   <h2><span class="num">14</span>Test suite — tests/run-tests.sh</h2>
-  <p class="summary">28 checks, run with a real 802.1X client. No Wi-Fi hardware is needed.</p>
-  <p>The tests image is Debian with <code>eapoltest</code> (the <code>eapol_test</code> program from wpa_supplicant), <code>freeradius-utils</code> (<code>radclient</code>) and <code>sqlite3</code>. <code>eapol_test</code> plays the device <em>and</em> the AP. It does the complete EAP exchange and sends RADIUS straight to <code>10.89.0.20</code>.</p>
+  <p class="summary">The test services exercise the password store, portal and end-to-end 802.1X flows. No Wi-Fi hardware is needed.</p>
+  <p>The tests image uses <code>eapol_test</code> from wpa_supplicant and <code>radclient</code>. <code>eapol_test</code> plays the device <em>and</em> the AP. It does the complete EAP exchange and sends RADIUS straight to <code>10.89.0.20</code>.</p>
   <div class="table-wrap"><table>
     <thead><tr><th class="num">Group</th><th>What it proves</th><th class="num">Checks</th></tr></thead>
     <tbody>
-      <tr><td class="num">1</td><td>5 users × PEAP and TTLS: Accept with the right Session-Timeout, VLAN, Class and real User-Name</td><td class="num">10</td></tr>
-      <tr><td class="num">2</td><td>Wrong password, unknown user and disabled001 are rejected, for both methods</td><td class="num">6</td></tr>
+      <tr><td class="num">1</td><td>TTLS/PAP and, while enabled, PEAP: Accept with the right authorization attributes and real User-Name</td><td class="num">multiple</td></tr>
+      <tr><td class="num">2</td><td>Wrong password, unknown user and disabled001 are rejected</td><td class="num">multiple</td></tr>
       <tr><td class="num">3</td><td>The client aborts when the server name is wrong, and the reason is a name mismatch</td><td class="num">2</td></tr>
       <tr><td class="num">4</td><td>Plain PAP via LDAP bind works and rejects; a wrong shared secret gets no reply</td><td class="num">3</td></tr>
-      <tr><td class="num">5</td><td>Accounting Start, Interim and Stop are answered; the SQLite row and the detail file are correct</td><td class="num">5</td></tr>
-      <tr><td class="num">6</td><td><code>radpostauth</code> logs the real identity for an accept and a reject</td><td class="num">2</td></tr>
+      <tr><td class="num">5</td><td>Accounting Start, Interim and Stop are answered; PostgreSQL and the detail file are correct</td><td class="num">multiple</td></tr>
+      <tr><td class="num">6</td><td><code>radpostauth</code> logs the real identity for an accept and a reject</td><td class="num">multiple</td></tr>
     </tbody>
   </table></div>
   <h4>How the assertions read attributes</h4>
   <div class="code"><div class="file">tests/run-tests.sh (excerpt)</div><pre><span class="c"># Last value of RADIUS attribute number $1 in eapol_test output $2 (the Access-Accept is the last packet)</span>
 attr() { awk -v n="$1" '$1=="Attribute" &amp;&amp; $2==n {getline; v=$2} END {print v}' "$2" | tr -d "'"; }
 hex2str() { [ -n "$1" ] &amp;&amp; printf '%b' "$(echo "$1" | sed 's/../\\x&amp;/g')"; }</pre></div>
-  <p><code>eapol_test</code> prints each attribute by number, with its value on the next line. Octet values such as VLAN <code>"20"</code> appear as hex <code>3230</code>, so <code>hex2str</code> decodes them. One test line then compares a single string: <code>SUCCESS 43200 20 faculty faculty001</code>.</p>
+  <p><code>eapol_test</code> prints each attribute by number, with its value on the next line. Octet values such as VLAN <code>"20"</code> appear as hex <code>3230</code>, so <code>hex2str</code> decodes them. One test line compares the configured re-check interval, VLAN, group and stored user ID.</p>
 </section>
 
 <!-- 15 -->
@@ -740,7 +776,7 @@ flowchart LR
   <p class="summary">Each one was found by a failing test or a debug trace, not by guessing.</p>
   <div class="callout bug"><p><strong>PEAP failed: "No NT-Password".</strong> The debug trace showed that LDAP did return the hash, as a 32-character hex string, but <code>mschap</code> needs 16 raw bytes. The stock inner-tunnel calls <code>pap</code> at the end of authorize, which converts it. Fix: add <code>pap</code> after the LDAP block.</p></div>
   <div class="callout bug"><p><strong>Accept logged as "anonymous", with two User-Names.</strong> The outer reply already contained <code>User-Name = "anonymous"</code>, and the stock-style <code>&amp;reply: += &amp;session-state:</code> added a second one. The AP would see two identities. Fix: copy only the six policy attributes, with <code>:=</code>. This also stopped internal TLS attributes from leaking into the reply.</p></div>
-  <div class="callout bug"><p><strong>Class stored as hex.</strong> <code>Class</code> is an octets attribute, so SQLite stored <code>0x73747564656e7473</code>. Fix: write it with <code>%{string:&amp;Class}</code>.</p></div>
+  <div class="callout bug"><p><strong>Class stored as hex.</strong> <code>Class</code> is an octets attribute, so the database needs <code>%{string:&amp;Class}</code> to store the group name as text.</p></div>
   <div class="callout bug"><p><strong>AP would be "unknown client".</strong> Docker Desktop's NAT, described in section 16. Fix: match the gateway address.</p></div>
   <div class="callout bug"><p><strong>phpLDAPadmin admin login refused.</strong> Three separate causes, described in section 13.</p></div>
 </section>
@@ -756,6 +792,7 @@ flowchart LR
       <tr><td>Forged RADIUS packets (BlastRADIUS, CVE-2024-3596)</td><td><code>require_message_authenticator = yes</code> and <code>limit_proxy_state = yes</code> for the AP</td></tr>
       <tr><td>Rogue NAS</td><td>Per-client shared secrets, 32 random characters; a wrong secret is dropped (tested)</td></tr>
       <tr><td>Hash theft from LDAP</td><td>ACLs: nobody reads <code>userPassword</code>; only <code>cn=radius</code> reads the NT hash; anonymous users list nothing</td></tr>
+      <tr><td>Portal service gets broad access</td><td>Separate accounts: <code>cn=portal</code> cannot read password hashes and PostgreSQL role <code>portal</code> is read-only</td></tr>
       <tr><td>LDAP filter injection via user name</td><td>The ldap module escapes values inserted into filters</td></tr>
       <tr><td>Admin UI exposed</td><td>Bound to <code>127.0.0.1</code>; only the <code>organizationalRole</code> admin can log in</td></tr>
       <tr><td>Secrets in git</td><td><code>.env</code> and <code>certs/*</code> ignored; checked with <code>git check-ignore</code> before the commit</td></tr>
@@ -772,7 +809,7 @@ flowchart LR
     <li>In the DIR-X6060 web UI, open Settings → Wireless → Security Mode. Look for a WPA2-Enterprise option.</li>
     <li>If it is there: connect this PC to the D-Link network, give the PC a fixed IP, and add the firewall rule for UDP 1812–1813 (README §6.2).</li>
     <li>In the router, set the RADIUS server to the PC's IP, port 1812, secret <code>RADIUS_SECRET_AP</code>. If there is an accounting field, set port 1813.</li>
-    <li>On a phone, install <code>ca.pem</code>, choose PEAP / MSCHAPv2, set the domain <code>radius.nitsrinagar.lab</code>, and log in as <code>student001</code>.</li>
+    <li>On a phone, install <code>ca.pem</code>, choose EAP-TTLS with PAP, set the domain <code>radius.nitsrinagar.lab</code>, and log in as <code>student001</code>.</li>
     <li>Watch <code>docker compose logs -f radius</code> for <code>Login OK</code>, then run <code>.\scripts\acct.ps1</code>.</li>
   </ol>
   <p>If the router has no Enterprise mode, use a D-Link DAP business AP or an OpenWrt device. The server side does not change.</p>
@@ -793,12 +830,12 @@ flowchart LR
       <tr><td><strong>session-state</strong></td><td>Attributes FreeRADIUS keeps between the rounds of one EAP conversation</td></tr>
       <tr><td><strong>DN</strong></td><td>Distinguished Name, the full path of an LDAP entry</td></tr>
       <tr><td><strong>rootDN</strong></td><td>The LDAP superuser (<code>cn=admin,…</code>), which bypasses ACLs</td></tr>
-      <tr><td><strong>SSHA / NT hash</strong></td><td>Salted SHA-1 for LDAP binds; MD4 of UTF-16LE for MSCHAPv2</td></tr>
+      <tr><td><strong>Argon2 / NT hash</strong></td><td>Argon2 is the password hash used by LDAP; an NT hash is the MD4 value PEAP-MSCHAPv2 needs</td></tr>
     </tbody>
   </table></div>
 </section>
 
-<footer>Campus Wi-Fi AAA Lab · Networking Project · built and verified 4 October 2026 · source in <code>aaa-server/</code>, see README.md for commands.</footer>
+<footer>Campus Wi-Fi AAA Lab · Networking Project · source in <code>aaa-server/</code>, see README.md for commands.</footer>
 </main>
 </div>
 <!-- Standalone copy: renders the Mermaid diagrams when the file is opened directly in a browser -->

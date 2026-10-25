@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<div class="narrow">
+  <h1>Your Wi-Fi account</h1>
+  <p class="lead">Log in with the user ID and password you use for the campus Wi-Fi. Here you can see which devices are online and change your password.</p>
+  {% if error %}<p class="note error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ url_for('login') }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="uid">User ID</label>
+    <input id="uid" name="uid" type="text" value="{{ uid or '' }}" maxlength="64" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" maxlength="256" autocomplete="current-password" required>
+    <button type="submit" class="primary">Log in</button>
+  </form>
+</div>
+{% endblock %}

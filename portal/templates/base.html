@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}Wi-Fi account{% endblock %} - NIT Srinagar Wi-Fi</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='portal.css') }}">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="band">
+    <div class="band-inner">
+      <a class="brand" href="{{ url_for('index') }}">
+        {# The three-slot mark: the device limit is the idea of this portal #}
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        NIT Srinagar Wi-Fi
+      </a>
+      {% if session.uid %}
+      <nav aria-label="Account">
+        <a href="{{ url_for('devices') }}"{% if request.endpoint == 'devices' %} aria-current="page"{% endif %}>My devices</a>
+        <a href="{{ url_for('password') }}"{% if request.endpoint == 'password' %} aria-current="page"{% endif %}>Change password</a>
+        <form method="post" action="{{ url_for('logout') }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="link">Log out <span class="who">{{ session.uid }}</span></button>
+        </form>
+      </nav>
+      {% endif %}
+    </div>
+  </header>
+  <main id="main">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <p class="note {{ category }}" role="status">{{ message }}</p>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
