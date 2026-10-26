@@ -28,10 +28,12 @@ jobs:
       # Caches Gradle and checks that gradle-wrapper.jar is an official one
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Android SDK platform 37 and build tools
+      # AGP installs the missing SDK platform and build tools itself (the package names of
+      # newer platforms, for example "android-37.0", differ between sdkmanager versions).
+      - name: Accept the Android SDK licenses
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0" > /dev/null
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list 2>/dev/null | grep -E '^ *platforms;android-3[6-9]' | sort -u || true
 
       - name: Lint, unit tests, debug APK
         run: ./gradlew --no-daemon lint testDebugUnitTest assembleDebug
