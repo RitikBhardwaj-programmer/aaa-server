@@ -191,7 +191,7 @@ class SharedLimiterTests(CoreCase):
 class ApiRuleTests(CoreCase):
     def test_cookie_alone_is_refused(self):
         self.assertEqual(self.web_login().status_code, 302)      # the client now holds a web session
-        self.db_results = [[], [], []]
+        self.db_results = [[], [], [], []]       # the last one: new-device alerts (activity.py)
         self.assertEqual(self.client.get("/devices").status_code, 200)
         resp = self.client.get("/api/v1/me")
         self.assertEqual(resp.status_code, 401)
