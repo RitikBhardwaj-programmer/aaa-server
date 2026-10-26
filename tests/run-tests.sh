@@ -68,6 +68,7 @@ wait_for "SELECT COUNT(*) FROM radacct WHERE nasipaddress = '$NAS' AND acctstopt
 echo "== 1. Authentication + authorization over EAP (user, group -> VLAN / Class, re-check every ${REAUTH_INTERVAL}s, interim every ${ACCT_INTERIM_INTERVAL}s)"
 # Attribute 29 = Termination-Action (1 = RADIUS-Request: re-authenticate, do not disconnect); 85 = Acct-Interim-Interval
 while read -r user vlan group; do
+    [ "${SEND_VLAN:-yes}" = no ] && vlan=""   # SEND_VLAN=no: the Accept carries no VLAN
     for method in PEAP TTLS; do
         result=$(eap_login "$method" "$user" "$PW")
         if [ "$method" = PEAP ] && [ "$ALLOW_PEAP" != yes ]; then
@@ -75,7 +76,7 @@ while read -r user vlan group; do
             continue
         fi
         got="$result $(attr 27 "$work/out") $(attr 29 "$work/out") $(attr 85 "$work/out") $(hex2str "$(attr 81 "$work/out")") $(hex2str "$(attr 25 "$work/out")") $(attr 1 "$work/out")"
-        check "$method $user -> Accept, VLAN $vlan, Class $group" "$got" "SUCCESS $REAUTH_INTERVAL 1 $ACCT_INTERIM_INTERVAL $vlan $group $user"
+        check "$method $user -> Accept, VLAN ${vlan:-none}, Class $group" "$got" "SUCCESS $REAUTH_INTERVAL 1 $ACCT_INTERIM_INTERVAL $vlan $group $user"
     done
 done <<EOF
 student001 10 students
@@ -153,6 +154,15 @@ acct guest001 Start "$dup" 02:00:00:00:00:02 > /dev/null; acct guest001 Start "$
 acct guest001 Stop "$dup" 02:00:00:00:00:02 "Acct-Session-Time = 5" > /dev/null
 check "duplicate Start -> one row, closed by the Stop" \
       "$(wait_for "SELECT COUNT(*), bool_and(acctstoptime IS NOT NULL) FROM radacct WHERE acctsessionid = '$dup';" "1|t")" "1|t"
+# After a failed re-check the Aruba AP-615 sends the Stop with the outer identity and no Class
+# (docs/experiments/2026-10-26-aruba-ap615-first-test.md). It must close the student's row.
+anon="anon-$(date +%s)-$$"
+acct student001 Start "$anon" 02:00:00:00:00:03 'Class = "students"' > /dev/null
+wait_for "SELECT COUNT(*) FROM radacct WHERE acctsessionid = '$anon';" 1 > /dev/null
+acct anonymous Stop "$anon" 02:00:00:00:00:03 "Acct-Session-Time = 308, Acct-Terminate-Cause = Lost-Service" > /dev/null
+check "Stop with User-Name anonymous -> closes the same row, user kept" \
+      "$(wait_for "SELECT COUNT(*), MAX(username), bool_and(acctstoptime IS NOT NULL), MAX(acctterminatecause) FROM radacct WHERE acctsessionid = '$anon';" "1|student001|t|Lost-Service")" \
+      "1|student001|t|Lost-Service"
 
 echo "== 6. Post-auth log (real inner identity, never the password)"
 row=$(q "SELECT reply FROM radpostauth WHERE username = 'faculty001' ORDER BY authdate DESC LIMIT 1;")

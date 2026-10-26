@@ -53,7 +53,7 @@ authenticate {
 preacct {
 	preprocess
 	rewrite_calling_station_id
-	acct_unique
+	campus_acct_unique
 }
 
 accounting {

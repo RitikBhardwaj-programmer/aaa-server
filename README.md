@@ -85,6 +85,8 @@ A user disabled in LDAP fails the next re-check, so access ends within `REAUTH_I
 
 The AP sends `Class` back in every accounting packet, so accounting records show the group.
 The AP applies the VLAN only if it supports dynamic VLAN assignment. Consumer routers such as the DIR-X6060 usually do not. Then the VLAN attribute is ignored, but the other rules still apply.
+An AP that does apply it (for example the Aruba AP-615) puts the client on that VLAN. On a network without the campus VLANs the client then gets no DHCP address and gives up after `Login OK`.
+For such a test set `SEND_VLAN=no` in `.env` and recreate the radius container (`docker compose up -d radius`): the Accept then has no VLAN attributes, and everything else stays the same.
 
 ## 4. Manage users
 
@@ -133,6 +135,7 @@ Only the admin entry can log in. Wi-Fi users cannot.
   - `user_devices`: every device MAC each user was seen with (kept `DEVICE_EXPIRY_DAYS`).
   - `device_limit_events`: every login that found the user already at the device limit.
 - How records get there: FreeRADIUS writes each accounting packet to a spool file (`radacct/spool/` in volume `aaa-lab_radius-acct`). The `buffered-sql` server reads it into PostgreSQL. If the database is down, records wait in the spool and are retried every 30 s. Logins still work.
+- One row per session, keyed by NAS + `Acct-Session-Id` (policy `campus_acct_unique`), **not** by user name. An AP may change `User-Name` inside a session: after a failed re-check the Aruba AP-615 sends the Stop as `anonymous`. That Stop still closes the student's row, and the row keeps the real user.
 - Times are the **server's receive time** (minus `Acct-Delay-Time`), not the AP clock. The AP's own `Event-Timestamp` stays in the text copy.
 - Text copy, exactly as received: `radacct/<nas-ip>/detail-YYYYMMDD` in the same volume.
 - Server log (each accept and reject, with the reason): `docker compose logs -f radius`.

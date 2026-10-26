@@ -11,7 +11,7 @@ server buffered-sql {
 	}
 
 	preacct {
-		acct_unique
+		campus_acct_unique
 	}
 
 	accounting {

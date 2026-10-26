@@ -82,6 +82,19 @@ campus_authorize {
 		reject
 	}
 
+	# SEND_VLAN=no leaves out the VLAN attributes, for a test AP on a network without the
+	# campus VLANs (an AP that applies them would put the client on a VLAN with no DHCP).
+	update control {
+		&Tmp-String-6 := "$ENV{SEND_VLAN}"
+	}
+	if (&control:Tmp-String-6 == "no") {
+		update reply {
+			&Tunnel-Type !* ANY
+			&Tunnel-Medium-Type !* ANY
+			&Tunnel-Private-Group-Id !* ANY
+		}
+	}
+
 	update reply {
 		&Acct-Interim-Interval := $ENV{ACCT_INTERIM_INTERVAL}
 	}
@@ -183,5 +196,17 @@ password_check {
 		update control {
 			&Auth-Type := ldap
 		}
+	}
+}
+
+# Accounting session key (replaces the stock acct_unique). The stock policy hashes User-Name,
+# but an AP may change it inside one session: after a failed re-check the Aruba AP-615 sends
+# the Stop with the outer identity "anonymous" (docs/experiments/2026-10-26-aruba-ap615-first-test.md).
+# The stock key then differs, the Stop inserts a second row and the student's row stays open.
+# Acct-Session-Id is unique per NAS (RFC 2866), so NAS + session ID is enough. Used in
+# sites-available/default and sites-available/buffered-sql, which must compute the same key.
+campus_acct_unique {
+	update request {
+		&Acct-Unique-Session-Id := "%{md5:%{Acct-Session-ID},%{%{NAS-IPv6-Address}:-%{NAS-IP-Address}},%{NAS-Identifier},%{NAS-Port-ID},%{NAS-Port}}"
 	}
 }

@@ -93,6 +93,7 @@ services:
       AUTH_REJECT_LIMIT: ${AUTH_REJECT_LIMIT}
       AUTH_REJECT_WINDOW: ${AUTH_REJECT_WINDOW}
       ALLOW_PEAP: ${ALLOW_PEAP}
+      SEND_VLAN: ${SEND_VLAN:-yes}
       TZ: ${TZ}
     ports:
       - "1812:1812/udp"   # authentication
@@ -206,6 +207,7 @@ services:
       DEVICE_LIMIT_MODE: ${DEVICE_LIMIT_MODE}
       AUTH_REJECT_LIMIT: ${AUTH_REJECT_LIMIT}
       ALLOW_PEAP: ${ALLOW_PEAP}
+      SEND_VLAN: ${SEND_VLAN:-yes}
       POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
     volumes:
       - ./certs/ca.pem:/certs/ca.pem:ro
