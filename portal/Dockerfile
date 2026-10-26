@@ -9,7 +9,7 @@ RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin port
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
-COPY app.py blocklist.txt ./
+COPY *.py blocklist.txt ./
 COPY templates/ templates/
 COPY static/ static/
 COPY tests/ tests/

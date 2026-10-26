@@ -7,12 +7,19 @@ Lab limits (see README, "Self-service portal"):
 - The session is a signed cookie: 15 minutes idle, 30 minutes at most after login. Every request
   re-checks the account in LDAP, so a password change, a disabled account or a lost Wi-Fi group
   ends every session of that user, including stolen copies of the cookie.
+
+The route logic is in core functions (login_core, device_overview, disconnect_core, password_core).
+They return data or raise a PortalError. The web pages below and the JSON API (apiauth.py and the
+feature modules registered at the end of this file) call the same functions, so both get the same
+checks and the same rate limits.
 """
+import importlib.util
 import ipaddress
 import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -21,6 +28,7 @@ from datetime import datetime, timedelta
 
 import psycopg
 from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask.sessions import SecureCookieSessionInterface
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from ldap3 import MODIFY_DELETE, NONE, SIMPLE, Connection, Server
 from ldap3.core.exceptions import (LDAPBindError, LDAPException, LDAPInvalidCredentialsResult,
@@ -57,13 +65,22 @@ GENERIC_LOGIN_ERROR = "Login failed. Check your ID and password, then try again.
 MIN_LENGTH, MAX_LENGTH = 15, 128                    # NIST SP 800-63B-4
 
 SESSION_ABSOLUTE_SECONDS = 30 * 60   # a session ends this long after login, even while in use
+API_PREFIX = "/api/"                 # JSON API (apiauth.py): Bearer token only, no cookie, no CSRF
 
 SECRET_KEY = need("PORTAL_SECRET_KEY")
 if len(SECRET_KEY) < 32 or SECRET_KEY == "change-me":
     # Whoever knows the key can forge a session for any user
     raise RuntimeError("PORTAL_SECRET_KEY must be a random value of at least 32 characters (scripts/init.ps1 makes one)")
 
+
+class PortalSessionInterface(SecureCookieSessionInterface):
+    def should_set_cookie(self, app, session):
+        # The API uses Bearer tokens only: an /api response never sets or refreshes the web session
+        return not is_api_request() and super().should_set_cookie(app, session)
+
+
 app = Flask(__name__)
+app.session_interface = PortalSessionInterface()
 app.config.update(
     SECRET_KEY=SECRET_KEY,
     SESSION_COOKIE_NAME="portal_session",
@@ -73,14 +90,55 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in ("1", "true", "yes"),
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=15),
     WTF_CSRF_TIME_LIMIT=900,
+    # CSRF follows the path, not the view: csrf_for_web() checks every request outside /api
+    WTF_CSRF_CHECK_DEFAULT=False,
     MAX_CONTENT_LENGTH=16 * 1024,
 )
-CSRFProtect(app)
+csrf = CSRFProtect(app)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = app.logger
 
 with open(os.path.join(os.path.dirname(__file__), "blocklist.txt"), encoding="utf-8") as f:
     BLOCKLIST = {line.strip().lower() for line in f if line.strip() and not line.startswith("#")}
+
+
+# ---- Errors of the core functions -------------------------------------------------------------
+
+class PortalError(Exception):
+    """A request that the core functions refuse. The message is safe to show to the user.
+    status is the HTTP status, code is the stable name the API sends (docs/api/v1.md)."""
+
+    status, code = 400, "invalid_input"
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.message = message
+        if code:
+            self.code = code
+
+
+class InvalidInput(PortalError):
+    status, code = 400, "invalid_input"
+
+
+class LoginFailed(PortalError):
+    status, code = 401, "login_failed"
+
+
+class NotFound(PortalError):
+    status, code = 404, "not_found"
+
+
+class Conflict(PortalError):
+    status, code = 409, "conflict"
+
+
+class RateLimited(PortalError):
+    status, code = 429, "rate_limited"
+
+
+class Unavailable(PortalError):
+    status, code = 503, "unavailable"
 
 
 # ---- Rate limits ------------------------------------------------------------------------------
@@ -146,7 +204,10 @@ LOGIN_BY_USER = AttemptLimiter(5, 15 * 60)      # key (uid, client IP)
 LOGIN_BY_IP = AttemptLimiter(20, 15 * 60)       # key client IP: stops spraying one password over many IDs
 PASSWORD_BY_USER = AttemptLimiter(5, 15 * 60)   # key uid: wrong "current password" on the password page
 DISCONNECTS = AttemptLimiter(5, 5 * 60)         # key uid: Disconnect-Requests sent
-LIMITERS = (LOGIN_BY_USER, LOGIN_BY_IP, PASSWORD_BY_USER, DISCONNECTS)
+# key uid: API calls with a valid token. Each call costs two LDAP searches on the one shared portal
+# connection, which logins also need
+API_CALLS = AttemptLimiter(60, 60)
+LIMITERS = (LOGIN_BY_USER, LOGIN_BY_IP, PASSWORD_BY_USER, DISCONNECTS, API_CALLS)
 # At most this many logins at once: every login costs slapd up to three Argon2 checks, and the same
 # slapd checks Wi-Fi passwords for the whole campus
 LOGIN_SLOTS = threading.BoundedSemaphore(4)
@@ -275,12 +336,14 @@ def authenticate(typed_uid, password):
 
 # ---- Password change (LDAP Password Modify; docs/decisions/0002) -----
 
-class PasswordChangeError(Exception):
+class PasswordChangeError(PortalError):
     """Message is safe to show to the user."""
+
+    status, code = 400, "password_refused"
 
 
 class WrongOldPassword(PasswordChangeError):
-    pass
+    status, code = 403, "wrong_password"
 
 
 def change_password(dn, old, new):
@@ -386,6 +449,134 @@ def send_disconnect(uid, s):
     return answers[-1] if answers else "none"
 
 
+# ---- Core functions (used by the web pages and by the API) -------------------------------------
+
+def current_account(dn, version):
+    """The account state when the account is unchanged since login (same entry version, not
+    disabled, still in a Wi-Fi group); None otherwise. Raises LDAPException if LDAP is unreachable.
+    login_required and apiauth.api_auth_required call it on every request."""
+    state = account_state(dn)
+    if state is None or not state["allowed"] or version is None or state["version"] != version:
+        return None
+    return state
+
+
+def login_core(typed_uid, password, ip):
+    """User dict ({"dn", "uid", "student", "version"}) on success. Raises Unavailable (busy or LDAP
+    down), RateLimited or LoginFailed. All failures of the credentials give the same message."""
+    typed = typed_uid.strip()
+    valid = bool(UID_RE.fullmatch(typed))
+    shown = typed if valid else "(invalid format)"      # never log a pasted password
+    if not LOGIN_SLOTS.acquire(blocking=False):
+        raise Unavailable("The login service is busy. Try again in a moment.", code="busy")
+    try:
+        # Every attempt is counted before the password is checked and taken back only on success,
+        # so parallel requests cannot slip past the limit. A malformed ID counts against the
+        # address only: it never creates a per-user entry.
+        user_key = (typed.lower(), ip)
+        if not LOGIN_BY_IP.attempt(ip) or (valid and not LOGIN_BY_USER.attempt(user_key)):
+            log.warning("login blocked by rate limit: uid=%s ip=%s", shown, ip)
+            raise RateLimited(GENERIC_LOGIN_ERROR)
+        try:
+            user = authenticate(typed, password) if valid else None
+        except LDAPException:
+            log.exception("LDAP unavailable during login")      # the attempt stays counted
+            raise Unavailable("The login service is temporarily unavailable. Try again later.") from None
+        if user is None:
+            log.warning("login failed: uid=%s ip=%s", shown, ip)
+            raise LoginFailed(GENERIC_LOGIN_ERROR)
+        LOGIN_BY_USER.succeeded(user_key, forget_all=True)
+        LOGIN_BY_IP.succeeded(ip)
+    finally:
+        LOGIN_SLOTS.release()
+    log.info("login ok: uid=%s ip=%s", user["uid"], ip)
+    return user
+
+
+def device_overview(uid):
+    """{"slots", "known", "events", "online"} for the user. Raises Unavailable."""
+    try:
+        with db() as conn, conn.cursor() as cur:
+            live = live_sessions(cur, uid)
+            cur.execute("SELECT callingstationid, first_seen, last_seen FROM user_devices "
+                        "WHERE username = %s ORDER BY last_seen DESC", (uid,))
+            known = cur.fetchall()
+            cur.execute("SELECT eventtime, callingstationid, live_devices, device_limit, mode "
+                        "FROM device_limit_events WHERE username = %s ORDER BY eventtime DESC LIMIT 10", (uid,))
+            events = cur.fetchall()
+    except psycopg.Error:
+        log.exception("database error on the devices page")
+        raise Unavailable("The device list is temporarily unavailable. Try again later.") from None
+    online = {s["callingstationid"] for s in live}
+    # One slot per device (a phone roaming between APs has several sessions), showing its newest
+    # session, in the order the devices joined: past the limit, the latest joiner is the one "over"
+    slots = {}
+    for s in live:                                   # newest session first
+        slot = slots.setdefault(s["callingstationid"], {"mac": s["callingstationid"], "session": s,
+                                                        "joined": s["acctstarttime"]})
+        slot["joined"] = min(slot["joined"], s["acctstarttime"])
+    slots = sorted(slots.values(), key=lambda d: d["joined"])
+    return {"slots": slots, "known": known, "events": events, "online": online}
+
+
+def disconnect_core(uid, mac):
+    """Sends a Disconnect-Request for each live session of this user's device. Returns a list of
+    {"nas", "result"} (result "ACK", "NAK" or "none"). Raises InvalidInput, Unavailable, NotFound,
+    Conflict (a disconnect of this user is in progress) or RateLimited."""
+    if not MAC_RE.fullmatch(mac):
+        raise InvalidInput("That device is not valid.")
+    try:
+        with db() as conn, conn.cursor() as cur:
+            # The request is not trusted: only sessions of the logged-in user can match
+            mine = [s for s in live_sessions(cur, uid) if s["callingstationid"] == mac]
+    except psycopg.Error:
+        log.exception("database error on disconnect")
+        raise Unavailable("The device list is temporarily unavailable. Try again later.") from None
+    if not mine:
+        raise NotFound("No active session of yours was found for that device.")
+    # Each request starts radclient (up to ~9 s): one at a time per user, and a few per 5 minutes
+    with DISCONNECTS_LOCK:
+        busy = uid in DISCONNECTS_RUNNING
+        if not busy:
+            DISCONNECTS_RUNNING.add(uid)
+    if busy:
+        raise Conflict("A disconnect is already in progress. Wait for it to finish.", code="disconnect_in_progress")
+    try:
+        if not DISCONNECTS.attempt(uid):
+            raise RateLimited("Too many disconnect requests. Wait 5 minutes and try again.")
+        results = [(s, send_disconnect(uid, s)) for s in mine]
+    finally:
+        with DISCONNECTS_LOCK:
+            DISCONNECTS_RUNNING.discard(uid)
+    for s, result in results:
+        log.info("disconnect: uid=%s mac=%s nas=%s result=%s", uid, mac, s["nas"], result)
+    return [{"nas": s["nas"], "result": result} for s, result in results]
+
+
+def password_core(uid, dn, old, new, confirm):
+    """Changes the password. Returns None on success: the account version then changes, which ends
+    every web session and API token of the user. Raises InvalidInput (rules), RateLimited,
+    WrongOldPassword, PasswordChangeError or Unavailable."""
+    error = check_new_password(uid, new, confirm)
+    if error:
+        raise InvalidInput(error)
+    # Counted before the old password is checked, so a stolen session cannot guess it, even in parallel
+    if not PASSWORD_BY_USER.attempt(uid):
+        raise RateLimited("Too many wrong attempts. Wait 15 minutes and try again.")
+    try:
+        change_password(dn, old, new)
+    except WrongOldPassword:
+        raise                                # stays counted
+    except PasswordChangeError:
+        PASSWORD_BY_USER.succeeded(uid)      # not a guess: take the attempt back
+        raise
+    except LDAPException:
+        log.exception("password change failed")
+        raise Unavailable("The login service is temporarily unavailable. Try again later.") from None
+    PASSWORD_BY_USER.succeeded(uid, forget_all=True)
+    log.info("password changed: uid=%s", uid)
+
+
 # ---- Pages ------------------------------------------------------------------------------------
 
 def login_required(view):
@@ -401,12 +592,12 @@ def login_required(view):
             flash("Your session has ended. Log in again.", "info")
             return redirect(url_for("login"))
         try:
-            state = account_state(session["dn"])
+            state = current_account(session["dn"], session.get("version"))
         except LDAPException:
             log.exception("LDAP unavailable during the session check")
             return render_template("message.html", title="Unavailable",
                                    text="The login service is temporarily unavailable. Try again later."), 503
-        if state is None or not state["allowed"] or state["version"] != session.get("version"):
+        if state is None:
             session.clear()
             flash("Your account has changed. Log in again.", "info")
             return redirect(url_for("login"))
@@ -451,6 +642,24 @@ def security_headers(resp):
     return resp
 
 
+@app.context_processor
+def page_helpers():
+    # base.html shows a nav link only when the feature module that serves it is installed
+    return {"has_endpoint": lambda endpoint: endpoint in app.view_functions}
+
+
+def is_api_request():
+    return request.path.startswith(API_PREFIX)
+
+
+@app.before_request
+def csrf_for_web():
+    """Every form outside /api needs a CSRF token, whatever its view. /api needs none: apiauth
+    accepts only the Authorization header there, which a browser never sends by itself."""
+    if app.config["WTF_CSRF_ENABLED"] and request.endpoint and not is_api_request():
+        csrf.protect()
+
+
 @app.errorhandler(CSRFError)
 def csrf_error(error):
     return render_template("message.html", title="Request refused",
@@ -467,39 +676,14 @@ def login():
     if request.method == "GET":
         return render_template("login.html")
     typed = request.form.get("uid", "").strip()
-    password = request.form.get("password", "")
-    ip = client_ip()
-    valid = bool(UID_RE.fullmatch(typed))
-    shown = typed if valid else "(invalid format)"      # never log a pasted password
-    if not LOGIN_SLOTS.acquire(blocking=False):
-        return render_template("login.html", error="The login service is busy. Try again in a moment.",
-                               uid=typed), 503
     try:
-        # Every attempt is counted before the password is checked and taken back only on success,
-        # so parallel requests cannot slip past the limit. A malformed ID counts against the
-        # address only: it never creates a per-user entry.
-        user_key = (typed.lower(), ip)
-        if not LOGIN_BY_IP.attempt(ip) or (valid and not LOGIN_BY_USER.attempt(user_key)):
-            log.warning("login blocked by rate limit: uid=%s ip=%s", shown, ip)
-            return render_template("login.html", error=GENERIC_LOGIN_ERROR, uid=typed), 429
-        try:
-            user = authenticate(typed, password) if valid else None
-        except LDAPException:
-            log.exception("LDAP unavailable during login")      # the attempt stays counted
-            return render_template("login.html", error="The login service is temporarily unavailable. "
-                                   "Try again later.", uid=typed), 503
-        if user is None:
-            log.warning("login failed: uid=%s ip=%s", shown, ip)
-            return render_template("login.html", error=GENERIC_LOGIN_ERROR, uid=typed), 401
-        LOGIN_BY_USER.succeeded(user_key, forget_all=True)
-        LOGIN_BY_IP.succeeded(ip)
-    finally:
-        LOGIN_SLOTS.release()
+        user = login_core(typed, request.form.get("password", ""), client_ip())
+    except PortalError as exc:
+        return render_template("login.html", error=exc.message, uid=typed), exc.status
     session.clear()                      # new session after login (no fixation)
     session.permanent = True
     session.update(uid=user["uid"], dn=user["dn"], student=user["student"], version=user["version"],
                    login_at=time.time())
-    log.info("login ok: uid=%s ip=%s", user["uid"], ip)
     return redirect(url_for("devices"))
 
 
@@ -514,28 +698,10 @@ def logout():
 def devices():
     uid = session["uid"]
     try:
-        with db() as conn, conn.cursor() as cur:
-            live = live_sessions(cur, uid)
-            cur.execute("SELECT callingstationid, first_seen, last_seen FROM user_devices "
-                        "WHERE username = %s ORDER BY last_seen DESC", (uid,))
-            known = cur.fetchall()
-            cur.execute("SELECT eventtime, callingstationid, live_devices, device_limit, mode "
-                        "FROM device_limit_events WHERE username = %s ORDER BY eventtime DESC LIMIT 10", (uid,))
-            events = cur.fetchall()
-    except psycopg.Error:
-        log.exception("database error on the devices page")
-        return render_template("message.html", title="Devices",
-                               text="The device list is temporarily unavailable. Try again later."), 503
-    online = {s["callingstationid"] for s in live}
-    # One slot per device (a phone roaming between APs has several sessions), showing its newest
-    # session, in the order the devices joined: past the limit, the latest joiner is the one "over"
-    slots = {}
-    for s in live:                                   # newest session first
-        slot = slots.setdefault(s["callingstationid"], {"mac": s["callingstationid"], "session": s,
-                                                        "joined": s["acctstarttime"]})
-        slot["joined"] = min(slot["joined"], s["acctstarttime"])
-    slots = sorted(slots.values(), key=lambda d: d["joined"])
-    return render_template("devices.html", uid=uid, slots=slots, known=known, events=events, online=online,
+        view = device_overview(uid)
+    except PortalError as exc:
+        return render_template("message.html", title="Devices", text=exc.message), exc.status
+    return render_template("devices.html", uid=uid, **view,
                            show_limit=session.get("student") and DEVICE_LIMIT > 0, limit=DEVICE_LIMIT,
                            reauth=REAUTH_INTERVAL)
 
@@ -543,43 +709,16 @@ def devices():
 @app.route("/devices/disconnect", methods=["POST"])
 @login_required
 def disconnect():
-    uid = session["uid"]
     mac = request.form.get("mac", "")
-    if not MAC_RE.fullmatch(mac):
-        flash("That device is not valid.", "error")
-        return redirect(url_for("devices"))
     try:
-        with db() as conn, conn.cursor() as cur:
-            # The form is not trusted: only sessions of the logged-in user can match
-            mine = [s for s in live_sessions(cur, uid) if s["callingstationid"] == mac]
-    except psycopg.Error:
-        log.exception("database error on disconnect")
-        flash("The device list is temporarily unavailable. Try again later.", "error")
+        results = disconnect_core(session["uid"], mac)
+    except PortalError as exc:
+        flash(exc.message, "error")
         return redirect(url_for("devices"))
-    if not mine:
-        flash("No active session of yours was found for that device.", "error")
-        return redirect(url_for("devices"))
-    # Each request starts radclient (up to ~9 s): one at a time per user, and a few per 5 minutes
-    with DISCONNECTS_LOCK:
-        busy = uid in DISCONNECTS_RUNNING
-        if not busy:
-            DISCONNECTS_RUNNING.add(uid)
-    if busy:
-        flash("A disconnect is already in progress. Wait for it to finish.", "error")
-        return redirect(url_for("devices"))
-    try:
-        if not DISCONNECTS.attempt(uid):
-            flash("Too many disconnect requests. Wait 5 minutes and try again.", "error")
-            return redirect(url_for("devices"))
-        results = [(s, send_disconnect(uid, s)) for s in mine]
-    finally:
-        with DISCONNECTS_LOCK:
-            DISCONNECTS_RUNNING.discard(uid)
-    for s, result in results:
-        log.info("disconnect: uid=%s mac=%s nas=%s result=%s", uid, mac, s["nas"], result)
-        if result == "ACK":
+    for r in results:
+        if r["result"] == "ACK":
             flash(f"{mac}: the access point disconnected the device (ACK).", "ok")
-        elif result == "NAK":
+        elif r["result"] == "NAK":
             flash(f"{mac}: the access point refused the request (NAK). The device is dropped at the next "
                   f"re-check, within {REAUTH_INTERVAL} seconds.", "error")
         else:
@@ -593,33 +732,47 @@ def disconnect():
 def password():
     if request.method == "GET":
         return render_template("password.html", peap=ALLOW_PEAP, min_length=MIN_LENGTH, max_length=MAX_LENGTH)
-    uid = session["uid"]
-    old = request.form.get("old", "")
-    new = request.form.get("new", "")
-    confirm = request.form.get("confirm", "")
-    error = check_new_password(uid, new, confirm)
-    # Counted before the old password is checked, so a stolen session cannot guess it, even in parallel
-    if error is None and not PASSWORD_BY_USER.attempt(uid):
-        error = "Too many wrong attempts. Wait 15 minutes and try again."
-    elif error is None:
-        try:
-            change_password(session["dn"], old, new)
-        except WrongOldPassword as exc:
-            error = str(exc)                # stays counted
-        except PasswordChangeError as exc:
-            PASSWORD_BY_USER.succeeded(uid)  # not a guess: take the attempt back
-            error = str(exc)
-        except LDAPException:
-            log.exception("password change failed")
-            error = "The login service is temporarily unavailable. Try again later."
-    if error:
-        return render_template("password.html", error=error, peap=ALLOW_PEAP,
+    try:
+        password_core(session["uid"], session["dn"], request.form.get("old", ""),
+                      request.form.get("new", ""), request.form.get("confirm", ""))
+    except PortalError as exc:
+        return render_template("password.html", error=exc.message, peap=ALLOW_PEAP,
                                min_length=MIN_LENGTH, max_length=MAX_LENGTH), 400
-    PASSWORD_BY_USER.succeeded(uid, forget_all=True)
-    log.info("password changed: uid=%s", uid)
     # The account version changed, which ends every session of this user (including this one)
     session.clear()
     flash("Your password was changed. Log in with the new password.", "ok")
     if ALLOW_PEAP:
         flash("PEAP no longer works for your account. Set up your devices as EAP-TTLS with PAP.", "info")
     return redirect(url_for("login"))
+
+
+# ---- Feature modules ------------------------------------------------------------------------------
+# Each later stage adds its own module with a Blueprint named `bp` (docs/api/v1.md, "Feature modules").
+# Only the modules that exist are loaded; an error inside one stops the portal (fail loud).
+
+FEATURE_MODULES = ("apiauth", "api", "activity", "downloads", "pki")
+
+
+def register_features():
+    """Loads each feature file from this folder by its path, so a module of the same name elsewhere
+    on sys.path can never load instead. The module is in sys.modules before it runs, because it
+    imports app, and app may be imported from it."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in FEATURE_MODULES:
+        path = os.path.join(here, f"{name}.py")
+        if not os.path.isfile(path):
+            continue                    # feature not installed
+        module = sys.modules.get(name)
+        if module is None or os.path.abspath(getattr(module, "__file__", "")) != path:
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                del sys.modules[name]
+                raise
+        app.register_blueprint(module.bp)
+
+
+register_features()

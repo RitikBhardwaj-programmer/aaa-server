@@ -4,6 +4,8 @@
 {# slots: one per device (MAC), in joining order; see devices() in app.py #}
 {% set over = show_limit and online|length > limit %}
 <h1>My devices</h1>
+{# New-device alerts (stage S2, activity.py); nothing is shown until that template exists #}
+{% include "_alerts.html" ignore missing %}
 
 {% if show_limit %}
 <p class="count{% if over %} over{% endif %}">{{ online|length }} of {{ limit }} devices online</p>
