@@ -152,6 +152,9 @@ services:
       REAUTH_INTERVAL: ${REAUTH_INTERVAL}
       RADIUS_SECRET_AP: ${RADIUS_SECRET_AP}
       AP_IP: ${AP_IP}
+      WIFI_SSID: ${WIFI_SSID:-NITS-Lab}
+      API_TOKEN_MINUTES: ${API_TOKEN_MINUTES:-15}
+      PROFILE_SIGNING: ${PROFILE_SIGNING:-yes}
       TZ: ${TZ}
     ports:
       - "127.0.0.1:8081:8081"   # localhost only, never exposed to the LAN
@@ -167,7 +170,8 @@ services:
       aaa:
         ipv4_address: 10.89.0.60
 
-  # Portal tests (stdlib unittest, Flask test client) against the live LDAP and PostgreSQL.
+  # Portal tests (stdlib unittest, Flask test client): tests/test_portal.py against the live LDAP and
+  # PostgreSQL, and tests/unit/ with mocks (no live services; also run by .github/workflows/portal.yml).
   # A separate service, so the running portal never holds the test-only radius database password.
   portal-test:
     build: ./portal
@@ -177,7 +181,7 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    entrypoint: ["python", "-m", "unittest", "-v", "tests.test_portal"]
+    entrypoint: ["python", "-m", "unittest", "discover", "-v", "-s", "tests", "-t", "."]
     environment:
       <<: *portal-env
       TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}

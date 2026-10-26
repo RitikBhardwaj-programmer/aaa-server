@@ -6,6 +6,8 @@
   <meta name="color-scheme" content="light">
   <title>{% block title %}Wi-Fi account{% endblock %} - NIT Srinagar Wi-Fi</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='portal.css') }}">
+  {# Feature pages add their own stylesheet here (no inline styles: see the CSP in app.py) #}
+  {% block head %}{% endblock %}
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -19,6 +21,10 @@
       {% if session.uid %}
       <nav aria-label="Account">
         <a href="{{ url_for('devices') }}"{% if request.endpoint == 'devices' %} aria-current="page"{% endif %}>My devices</a>
+        {# A link is shown only when its feature module is installed (app.register_features) #}
+        {% for endpoint, label in [('activity.page', 'Sign-in activity'), ('downloads.setup', 'Set up Wi-Fi'), ('pki.certs', 'Device certificates')] if has_endpoint(endpoint) %}
+        <a href="{{ url_for(endpoint) }}"{% if request.endpoint == endpoint %} aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
         <a href="{{ url_for('password') }}"{% if request.endpoint == 'password' %} aria-current="page"{% endif %}>Change password</a>
         <form method="post" action="{{ url_for('logout') }}" class="inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

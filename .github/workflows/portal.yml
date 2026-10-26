@@ -1,0 +1,29 @@
+# Portal checks with no live services: the unit tests (portal/tests/unit, mocks only) and pyflakes.
+# The live suite (portal/tests/test_portal.py) needs LDAP and PostgreSQL: scripts/test.ps1 runs it.
+name: portal
+
+on:
+  push:
+    paths: ["portal/**", ".github/workflows/portal.yml"]
+  pull_request:
+    paths: ["portal/**", ".github/workflows/portal.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the portal requirements and pyflakes
+        run: pip install -r portal/requirements.txt pyflakes==3.4.0
+      - name: Unit tests
+        working-directory: portal
+        run: python -m unittest discover -v -s tests/unit -t .
+      - name: pyflakes
+        run: pyflakes portal
