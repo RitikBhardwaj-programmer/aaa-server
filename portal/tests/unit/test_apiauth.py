@@ -2,6 +2,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -11,7 +12,7 @@ from itsdangerous import URLSafeTimedSerializer
 import apiauth
 import app as portal
 
-from .helpers import DN, PASSWORD, UID, CoreCase
+from .helpers import DN, PASSWORD, UID, CoreCase, csrf_token
 
 
 class TokenTests(CoreCase):
@@ -54,12 +55,27 @@ class TokenTests(CoreCase):
     def test_tampered_tokens_are_refused(self):
         token = self.api_token()
         other_key = URLSafeTimedSerializer("another-secret-key-0123456789abcdef", salt=apiauth.TOKEN_SALT)
-        session_salt = URLSafeTimedSerializer(portal.SECRET_KEY, salt="cookie-session")
         claims = {"uid": "admin", "dn": DN, "ver": "csn-1", "iat": int(time.time()), "exp": int(time.time()) + 60}
         flipped = token[:-2] + ("A" if token[-2] != "A" else "B") + token[-1]
-        for bad in (flipped, token + "x", other_key.dumps(claims), session_salt.dumps(claims), "junk", "a.b.c"):
+        for bad in (flipped, token + "x", other_key.dumps(claims), "junk", "a.b.c"):
             with self.subTest(bad=bad[:20]):
                 self.assertEqual(self.client.get("/api/v1/me", headers=self.bearer(bad)).status_code, 401)
+
+    def test_signed_but_unreadable_payload_is_401(self):
+        # Right signature, payload not JSON: itsdangerous raises BadPayload (a BadData)
+        signer = apiauth.serializer.make_signer(apiauth.TOKEN_SALT)
+        token = signer.sign(b"not json").decode()
+        self.assertEqual(self.client.get("/api/v1/me", headers=self.bearer(token)).status_code, 401)
+
+    def test_real_web_secrets_are_not_tokens(self):
+        # The real session cookie and a real CSRF token, both signed with PORTAL_SECRET_KEY
+        self.assertEqual(self.web_login().status_code, 302)
+        cookie = self.client.get_cookie("portal_session").value
+        form_token = csrf_token(self.client, "/password")
+        for value in (cookie, form_token):
+            with self.subTest(value=value[:12]):
+                api = portal.app.test_client()           # no cookie: only the header
+                self.assertEqual(api.get("/api/v1/me", headers=self.bearer(value)).status_code, 401)
 
     def test_changed_entry_version_ends_the_token(self):
         token = self.api_token()
@@ -159,6 +175,11 @@ class SharedLimiterTests(CoreCase):
                 portal.LOGIN_SLOTS.release()
         self.assertEqual(self.api_login().status_code, 200)
 
+    def test_uid_case_does_not_split_the_limit(self):
+        for _ in range(5):
+            self.api_login(uid=UID.upper(), password="wrong")
+        self.assertEqual(self.web_login(uid=UID.lower()).status_code, 429)
+
     def test_success_takes_the_attempts_back(self):
         for _ in range(4):
             self.api_login(password="wrong")
@@ -236,6 +257,61 @@ class ApiRuleTests(CoreCase):
         with mock.patch.dict(portal.app.view_functions, {"apiauth.me": forgot_the_decorator}):
             resp = self.client.get("/api/v1/me")
         self.assertEqual(resp.status_code, 401)
+
+    def test_an_unprotected_api_post_is_401_not_a_csrf_error(self):
+        def forgot_the_decorator():
+            return {"secret": True}
+        with mock.patch.dict(portal.app.view_functions, {"apiauth.token": forgot_the_decorator}):
+            resp = self.client.post("/api/v1/auth/token", json={"uid": UID, "password": PASSWORD})
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.get_json()["error"]["code"], "unauthorized")
+
+    def test_web_forms_still_need_a_csrf_token(self):
+        self.web_login()
+        for path, data in (("/logout", {}), ("/password", {"old": PASSWORD, "new": "x" * 20, "confirm": "x" * 20}),
+                           ("/devices/disconnect", {"mac": "DE-AD-BE-EF-00-01"}), ("/login", {"uid": UID})):
+            with self.subTest(path=path):
+                resp = self.client.post(path, data=data)
+                self.assertEqual(resp.status_code, 400)
+                self.assertIn("The form has expired or is invalid", resp.get_data(as_text=True))
+        self.mocks["change_password"].assert_not_called()
+        self.mocks["send_disconnect"].assert_not_called()
+
+    def test_api_decorators_refuse_views_outside_api(self):
+        # A later stage that mounts an API view on a web path must not get a CSRF-free web form
+        token = self.api_token()
+        public = apiauth.api_public(lambda: "served")
+        protected = apiauth.api_auth_required(lambda: "served")
+        self.web_login()
+        form = {"csrf_token": csrf_token(self.client, "/password")}
+        with mock.patch.dict(portal.app.view_functions, {"logout": public}):
+            resp = self.client.post("/logout", data=form)
+        self.assertEqual((resp.status_code, resp.get_json()["error"]["code"]), (500, "server_error"))
+        with mock.patch.dict(portal.app.view_functions, {"devices": protected}):
+            resp = self.client.get("/devices", headers=self.bearer(token))
+        self.assertEqual(resp.status_code, 500)
+        self.assertNotIn("served", resp.get_data(as_text=True))
+
+    def test_api_calls_are_limited_per_user(self):
+        token = self.api_token()
+        for _ in range(60):
+            self.assertEqual(self.client.get("/api/v1/me", headers=self.bearer(token)).status_code, 200)
+        checks = self.mocks["account_state"].call_count
+        resp = self.client.get("/api/v1/me", headers=self.bearer(token))
+        self.assertEqual((resp.status_code, resp.get_json()["error"]["code"]), (429, "rate_limited"))
+        self.assertEqual(self.mocks["account_state"].call_count, checks)     # no LDAP work when limited
+
+    def test_feature_files_load_from_the_portal_folder_only(self):
+        # A module of the same name earlier on sys.path must not load instead of portal/apiauth.py
+        here = os.path.dirname(os.path.abspath(portal.__file__))
+        with tempfile.TemporaryDirectory() as other:
+            with open(os.path.join(other, "apiauth.py"), "w") as f:
+                f.write("raise RuntimeError('impostor module loaded')\n")
+            code = ("import sys; sys.path.append(%r); import app; print(sys.modules['apiauth'].__file__)" % here)
+            run = subprocess.run([sys.executable, "-c", code], env=dict(os.environ, RADIUS_SECRET_AP=""),
+                                 capture_output=True, text=True, cwd=other)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.strip(), os.path.join(here, "apiauth.py"))
 
     def test_feature_hook_registered_apiauth(self):
         self.assertIn("apiauth", portal.app.blueprints)

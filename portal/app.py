@@ -13,12 +13,13 @@ They return data or raise a PortalError. The web pages below and the JSON API (a
 feature modules registered at the end of this file) call the same functions, so both get the same
 checks and the same rate limits.
 """
-import importlib
+import importlib.util
 import ipaddress
 import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -26,7 +27,7 @@ from collections import deque
 from datetime import datetime, timedelta
 
 import psycopg
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, flash, redirect, render_template, request, session, url_for
 from flask.sessions import SecureCookieSessionInterface
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from ldap3 import MODIFY_DELETE, NONE, SIMPLE, Connection, Server
@@ -89,6 +90,8 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in ("1", "true", "yes"),
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=15),
     WTF_CSRF_TIME_LIMIT=900,
+    # CSRF follows the path, not the view: csrf_for_web() checks every request outside /api
+    WTF_CSRF_CHECK_DEFAULT=False,
     MAX_CONTENT_LENGTH=16 * 1024,
 )
 csrf = CSRFProtect(app)
@@ -201,7 +204,10 @@ LOGIN_BY_USER = AttemptLimiter(5, 15 * 60)      # key (uid, client IP)
 LOGIN_BY_IP = AttemptLimiter(20, 15 * 60)       # key client IP: stops spraying one password over many IDs
 PASSWORD_BY_USER = AttemptLimiter(5, 15 * 60)   # key uid: wrong "current password" on the password page
 DISCONNECTS = AttemptLimiter(5, 5 * 60)         # key uid: Disconnect-Requests sent
-LIMITERS = (LOGIN_BY_USER, LOGIN_BY_IP, PASSWORD_BY_USER, DISCONNECTS)
+# key uid: API calls with a valid token. Each call costs two LDAP searches on the one shared portal
+# connection, which logins also need
+API_CALLS = AttemptLimiter(60, 60)
+LIMITERS = (LOGIN_BY_USER, LOGIN_BY_IP, PASSWORD_BY_USER, DISCONNECTS, API_CALLS)
 # At most this many logins at once: every login costs slapd up to three Argon2 checks, and the same
 # slapd checks Wi-Fi passwords for the whole campus
 LOGIN_SLOTS = threading.BoundedSemaphore(4)
@@ -646,11 +652,16 @@ def is_api_request():
     return request.path.startswith(API_PREFIX)
 
 
+@app.before_request
+def csrf_for_web():
+    """Every form outside /api needs a CSRF token, whatever its view. /api needs none: apiauth
+    accepts only the Authorization header there, which a browser never sends by itself."""
+    if app.config["WTF_CSRF_ENABLED"] and request.endpoint and not is_api_request():
+        csrf.protect()
+
+
 @app.errorhandler(CSRFError)
 def csrf_error(error):
-    if is_api_request():
-        # Only an /api view without apiauth.api_auth_required or api_public gets here (fail closed)
-        return jsonify(error={"code": "csrf", "message": "The request was refused."}), 400
     return render_template("message.html", title="Request refused",
                            text="The form has expired or is invalid. Go back, reload the page and try again."), 400
 
@@ -743,10 +754,25 @@ FEATURE_MODULES = ("apiauth", "api", "activity", "downloads", "pki")
 
 
 def register_features():
+    """Loads each feature file from this folder by its path, so a module of the same name elsewhere
+    on sys.path can never load instead. The module is in sys.modules before it runs, because it
+    imports app, and app may be imported from it."""
     here = os.path.dirname(os.path.abspath(__file__))
     for name in FEATURE_MODULES:
-        if os.path.exists(os.path.join(here, f"{name}.py")):
-            app.register_blueprint(importlib.import_module(name).bp)
+        path = os.path.join(here, f"{name}.py")
+        if not os.path.isfile(path):
+            continue                    # feature not installed
+        module = sys.modules.get(name)
+        if module is None or os.path.abspath(getattr(module, "__file__", "")) != path:
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                del sys.modules[name]
+                raise
+        app.register_blueprint(module.bp)
 
 
 register_features()

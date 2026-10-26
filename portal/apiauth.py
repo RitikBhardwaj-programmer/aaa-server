@@ -2,13 +2,16 @@
 
 - POST /api/v1/auth/token changes {uid, password} into a Bearer token. It calls app.login_core, so
   the API and the web login share the same rate limits and login slots.
+- Each user can make app.API_CALLS calls per minute with valid tokens (60), because every call
+  costs LDAP searches on the connection that logins also use.
 - A token is signed with PORTAL_SECRET_KEY (itsdangerous, salt "api-v1", so a session cookie is
   never a valid token). It carries uid, dn, the entry version (entryCSN) and the issue time. It ends
   API_TOKEN_MINUTES after issue (default 15), and never later than 30 minutes after issue.
 - api_auth_required checks the account in LDAP on every call, like login_required: a password
   change, a disabled account or a lost Wi-Fi group ends every token of that user.
 - /api accepts only the Authorization header. A session cookie alone gets 401, so a web page on
-  another site cannot use the browser's login (no CSRF token is needed for that reason).
+  another site cannot use the browser's login. For that reason app.csrf_for_web() checks no CSRF
+  token under /api, and the decorators below refuse to serve a view outside /api.
 - Writes (POST, PUT, PATCH) need Content-Type: application/json. No CORS headers are sent.
 """
 import functools
@@ -16,7 +19,7 @@ import os
 import time
 
 from flask import Blueprint, current_app, g, jsonify, request
-from itsdangerous import BadSignature, URLSafeTimedSerializer
+from itsdangerous import BadData, URLSafeTimedSerializer
 from ldap3.core.exceptions import LDAPException
 from werkzeug.exceptions import HTTPException
 
@@ -62,7 +65,7 @@ def read_token(token):
     """The token's payload, or None when it is forged, changed or expired."""
     try:
         payload = serializer.loads(token, max_age=TOKEN_SECONDS)
-    except BadSignature:                # includes SignatureExpired
+    except BadData:                     # forged, changed, expired or not readable
         return None
     if not isinstance(payload, dict) or not all(isinstance(payload.get(k), str) for k in ("uid", "dn", "ver")):
         return None
@@ -86,10 +89,22 @@ def device_limit(student):
     return core.DEVICE_LIMIT if student and core.DEVICE_LIMIT > 0 else None
 
 
+def outside_api():
+    """A view with an API decorator, reached outside /api, where the session cookie and CSRF rules
+    apply. That is a programming error: refuse it (fail closed)."""
+    core.log.error("API view refused outside %s: %s", core.API_PREFIX, request.endpoint)
+    return api_error(500, "server_error", "This page is not available.")
+
+
 def api_public(view):
-    """An /api view that needs no token (only the token endpoint). Exempt from CSRF."""
-    view.api_public = True
-    return core.csrf.exempt(view)
+    """An /api view that needs no token (only the token endpoint)."""
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        if not core.is_api_request():
+            return outside_api()
+        return view(*args, **kwargs)
+    wrapper.api_public = True
+    return wrapper
 
 
 def api_auth_required(view):
@@ -97,12 +112,17 @@ def api_auth_required(view):
     login_required, on every call). Sets g.api_user = {"uid", "dn", "version", "student"}."""
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
+        if not core.is_api_request():
+            return outside_api()
         token = bearer_token()
         if token is None:
             return unauthorized("A Bearer token is needed.")
         payload = read_token(token)
         if payload is None:
             return unauthorized()
+        # Before the LDAP check, so a script with a valid token cannot keep slapd busy
+        if not core.API_CALLS.attempt(payload["uid"]):
+            return api_error(429, "rate_limited", "Too many requests. Wait a minute and try again.")
         try:
             state = core.current_account(payload["dn"], payload["ver"])
         except LDAPException:
@@ -114,8 +134,7 @@ def api_auth_required(view):
                       "student": "students" in state["groups"]}
         return view(*args, **kwargs)
     wrapper.api_auth = True
-    # No CSRF token: the browser never sends the Authorization header by itself
-    return core.csrf.exempt(wrapper)
+    return wrapper
 
 
 def json_body():
