@@ -155,9 +155,19 @@ services:
       WIFI_SSID: ${WIFI_SSID:-NITS-Lab}
       API_TOKEN_MINUTES: ${API_TOKEN_MINUTES:-15}
       PROFILE_SIGNING: ${PROFILE_SIGNING:-yes}
+      PROFILE_CA_FILE: /certs/ca.pem
+      PROFILE_SIGNING_CERT: /certs/profile-sign.pem
+      PROFILE_SIGNING_KEY: /certs/profile-sign.key
       TZ: ${TZ}
     ports:
       - "127.0.0.1:8081:8081"   # localhost only, never exposed to the LAN
+    # Wi-Fi setup profiles (stage S3): the lab root CA, and the profile-signing certificate and key
+    # (certs/make-certs.sh). Only these three files: never ca.key or the RADIUS server key.
+    # Run certs/make-certs.sh before the first start: compose does not create missing files.
+    volumes:
+      - {type: bind, source: ./certs/ca.pem, target: /certs/ca.pem, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./certs/profile-sign.pem, target: /certs/profile-sign.pem, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./certs/profile-sign.key, target: /certs/profile-sign.key, read_only: true, bind: {create_host_path: false}}
     # Hardening: read-only file system (only /tmp is writable, in memory: the radclient secret file),
     # no Linux capabilities, no privilege gain through setuid programs
     read_only: true
