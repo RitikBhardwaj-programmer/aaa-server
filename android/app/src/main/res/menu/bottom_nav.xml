@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/nav_devices" android:icon="@drawable/ic_devices" android:title="@string/nav_devices" />
+    <item android:id="@+id/nav_activity" android:icon="@drawable/ic_history" android:title="@string/nav_activity" />
+    <item android:id="@+id/nav_wifi" android:icon="@drawable/ic_wifi" android:title="@string/nav_wifi" />
+</menu>

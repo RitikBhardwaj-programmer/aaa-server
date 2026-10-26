@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NITS Wi-Fi</string>
+    <string name="brand_title">NIT Srinagar Wi-Fi</string>
+    <string name="brand_subtitle">Your devices, sign-ins and the NITS-Lab network</string>
+
+    <!-- Login -->
+    <string name="login_uid">User ID</string>
+    <string name="login_password">Password</string>
+    <string name="login_button">Log in</string>
+    <string name="login_portal">Portal: %1$s</string>
+    <string name="login_needed">Enter your user ID and password.</string>
+
+    <!-- Home -->
+    <string name="nav_devices">Devices</string>
+    <string name="nav_activity">Activity</string>
+    <string name="nav_wifi">Set up Wi-Fi</string>
+    <string name="menu_change_password">Change password</string>
+    <string name="menu_log_out">Log out</string>
+    <string name="logged_in_as">Logged in as %1$s</string>
+    <string name="refresh">Refresh</string>
+    <string name="loading">Loading…</string>
+
+    <!-- Devices -->
+    <string name="devices_title">My devices</string>
+    <string name="devices_slots_header">Online now</string>
+    <string name="devices_known_header">Devices seen</string>
+    <string name="devices_events_header">Device limit events</string>
+    <string name="devices_none_online">No device is online.</string>
+    <string name="devices_none_known">No device has signed in yet.</string>
+    <string name="devices_slot_detail">%1$s · %2$s\nSince %3$s · up %4$s, down %5$s</string>
+    <string name="devices_over_limit">Over the limit</string>
+    <string name="devices_disconnect">Disconnect</string>
+    <string name="devices_disconnect_desc">Disconnect %1$s</string>
+    <string name="devices_disconnect_title">Disconnect this device?</string>
+    <string name="devices_disconnect_text">%1$s goes off the Wi-Fi now. It can join again with your password.</string>
+    <string name="devices_known_detail">First seen %1$s · last seen %2$s</string>
+    <string name="devices_alert_hint">%1$s. Review them under Activity.</string>
+    <string name="devices_online">Online</string>
+    <string name="devices_event_detail">%1$s · %2$s of %3$s online · %4$s</string>
+    <string name="mode_soft">let in, logged only</string>
+    <string name="mode_enforce">refused</string>
+
+    <!-- Activity and alerts -->
+    <string name="activity_header">Sign-ins in the last 7 days</string>
+    <string name="activity_none">No sign-ins in the last 7 days.</string>
+    <string name="activity_accept">Signed in</string>
+    <string name="activity_reject">Refused</string>
+    <string name="activity_detail">%1$s · %2$s</string>
+    <string name="private_address">private address</string>
+    <string name="unknown_ap">unknown access point</string>
+    <string name="alert_detail">First seen %1$s · last seen %2$s</string>
+    <string name="alert_me">This was me</string>
+    <string name="alert_not_me">Not me</string>
+    <string name="alert_me_desc">%1$s was me</string>
+    <string name="alert_not_me_desc">%1$s was not me</string>
+    <string name="alert_not_me_title">Not your device?</string>
+    <string name="alert_not_me_text">The app disconnects %1$s now. Then change your password, so nobody else can use it.</string>
+    <string name="alert_reviewed">Thank you. %1$s is marked as yours.</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Wi-Fi setup -->
+    <string name="wifi_title">Set up Wi-Fi</string>
+    <string name="wifi_intro">The app saves the NITS-Lab network with the right security settings: EAP-TTLS with PAP, the lab CA certificate, and the server name check. Then the phone connects by itself.</string>
+    <string name="wifi_password">Your Wi-Fi password (the portal password)</string>
+    <string name="wifi_password_help">Android keeps it with the network. The app does not store it.</string>
+    <string name="wifi_button">Set up Wi-Fi</string>
+    <string name="wifi_settings">Network %1$s · user %2$s · server %3$s</string>
+    <string name="wifi_android10">Android 10: the phone shows a notification \"Allow suggested Wi-Fi networks?\". Tap Allow.</string>
+    <string name="wifi_android11">Android shows a screen \"Save this network?\". Tap Save.</string>
+    <string name="wifi_mac_note">The app asks Android to keep one fixed Wi-Fi address for NITS-Lab, so this phone counts as one device. On Samsung phones, check Settings &gt; Wi-Fi &gt; NITS-Lab &gt; MAC address type: keep \"Randomized MAC\" (it stays the same for this network) or choose \"Phone MAC\".</string>
+
+    <!-- Change password -->
+    <string name="password_title">Change password</string>
+    <string name="password_old">Current password</string>
+    <string name="password_new">New password</string>
+    <string name="password_confirm">New password again</string>
+    <string name="password_rules">15 to 128 characters. Not your user ID, not a common password. A few words make a good password.</string>
+    <string name="password_button">Change password</string>
+    <string name="password_done_title">Password changed</string>
+    <string name="password_done_text">Log in again with the new password. Then set up Wi-Fi again, so the phone uses the new password.</string>
+    <string name="ok">OK</string>
+    <string name="navigate_up">Back</string>
+</resources>

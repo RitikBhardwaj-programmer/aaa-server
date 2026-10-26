@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The portal tokens (portal/static/portal.css). -->
+<resources>
+    <color name="ink">#12343B</color>
+    <color name="snow">#EEF3F1</color>
+    <color name="paper">#FFFFFF</color>
+    <color name="kesar">#D9981C</color>
+    <color name="chinar">#A8432E</color>
+    <color name="willow">#3E6B55</color>
+    <color name="slate">#5B6B70</color>
+    <color name="rule">#C8D3D1</color>
+    <color name="alert_bg">#FBEFD6</color>
+</resources>
