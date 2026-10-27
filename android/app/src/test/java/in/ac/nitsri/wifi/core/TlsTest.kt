@@ -162,7 +162,7 @@ class TlsTest {
         assertEquals("POST", post.method)
         assertEquals("http://127.0.0.1:8081/api/v1/certs", post.url)
         val body = JSONObject(post.body!!)
-        assertEquals(setOf("csr_pem", "label"), body.keySet())
+        assertEquals(setOf("csr_pem", "label"), body.keys().asSequence().toSet())
         assertEquals("samsung SM-S911B", body.getString("label"))
         assertTrue(TestPki.csrKey(body.getString("csr_pem")).encoded.contentEquals(r.credential.chain[0].publicKey.encoded))
         assertFalse("the private key never leaves the phone", post.body!!.contains("PRIVATE"))
