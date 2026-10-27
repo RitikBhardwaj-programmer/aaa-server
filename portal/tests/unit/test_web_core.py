@@ -37,7 +37,7 @@ class WebLoginTests(CoreCase):
 
     def test_session_check_follows_the_account(self):
         self.web_login()
-        self.db_results = [[], [], []]
+        self.db_results = [[], [], [], []]       # live, seen, limit events; new-device alerts (activity.py)
         self.assertEqual(self.client.get("/devices").status_code, 200)
         self.state["version"] = "csn-2"
         resp = self.client.get("/devices")
@@ -69,7 +69,7 @@ class WebDeviceTests(CoreCase):
         other = "DE-AD-BE-EF-00-02"
         self.db_results = [[live_row(MAC, minutes_ago=5), live_row(other, minutes_ago=20)],
                            [{"callingstationid": MAC, "first_seen": NOW, "last_seen": NOW}],
-                           []]
+                           [], []]                     # the last one: new-device alerts (activity.py)
         html = self.client.get("/devices").get_data(as_text=True)
         self.assertIn("2 of 3 devices online", html)
         self.assertLess(html.index(other), html.index(MAC))      # slots in joining order

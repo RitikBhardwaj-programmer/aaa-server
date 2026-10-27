@@ -191,11 +191,12 @@ Open http://127.0.0.1:8081 on this PC. A Wi-Fi user logs in with the Wi-Fi ID an
 
 - **Change the password.** 15 to 128 characters, no other rules (NIST SP 800-63B-4). The password must not contain the user ID and must not be in `portal/blocklist.txt` (about 100 common passwords). The portal uses RFC 3062 Password Modify as the user; slapd hashes the new password as `{ARGON2}` (decision 0002).
 - **See their devices.** Live sessions (MAC, access point, IP, start, last update, bytes), every device seen, "N of 3 devices online" for students, and recent device-limit events.
+- **See sign-in activity and new-device alerts.** The `/activity` page lists the user's own Wi-Fi logins of the last 30 days (time, result, access point MAC and SSID, device MAC; a random phone address is marked "private address"). A device first seen in the last 30 days and not yet reviewed gives one banner on "My devices" ("2 new devices signed in"). "This was me" marks it as reviewed; "Not me" disconnects it and opens the password change.
 - **Disconnect a device.** The portal sends an RFC 5176 Disconnect-Request for each open session of that MAC. It first checks that the session belongs to the logged-in user. The DAP-X3060 ignores the request, so the page says the device is dropped at the next re-check (within `REAUTH_INTERVAL`).
 
 **PEAP after a password change.** Password Modify updates only `userPassword`, so the portal first **deletes** the user's NT hash (`sambaNTPassword`); otherwise the old password would keep working for PEAP. PEAP then stops working for that user, and their devices must be set up as EAP-TTLS/PAP. The password page says so. (The LDAP ACL lets a user delete, but not read or write, their own NT hash.)
 
-Least privilege: the portal binds to LDAP as `cn=portal` (reads entries and groups, no password hashes) over one reused connection, and to PostgreSQL as role `portal` (SELECT on `radacct`, `user_devices`, `device_limit_events`). It never uses `cn=radius`. To check a login it finds the user with `cn=portal`, then binds as the user.
+Least privilege: the portal binds to LDAP as `cn=portal` (reads entries and groups, no password hashes) over one reused connection, and to PostgreSQL as role `portal` (SELECT on `radacct`, `user_devices`, `device_limit_events`; EXECUTE on the function `portal_signins`, which gives four columns of one user's `radpostauth` rows; SELECT, INSERT and UPDATE of the verdict on `device_reviews`). It cannot read `radpostauth` directly. It never uses `cn=radius`. To check a login it finds the user with `cn=portal`, then binds as the user.
 
 Abuse limits (all counted before the password is checked, so parallel requests cannot slip through): 5 attempts per (ID, client address) and 20 per client address in 15 minutes; 5 wrong "current password" tries per user in 15 minutes; at most 4 logins at once (each costs slapd up to three Argon2 checks); one Disconnect-Request at a time and 5 per 5 minutes per user. Every login failure gives the same message.
 
@@ -207,6 +208,13 @@ Database role on an existing database (first start does it by itself; needs `POS
 docker compose up -d postgres
 docker compose exec -T postgres psql -U postgres -d radius -v ON_ERROR_STOP=1 -f /migrations/002-portal-role.sql
 docker compose exec -T postgres sh /migrations/002-portal-password.sh
+```
+
+Sign-in activity and new-device alerts (`/activity`, the banner on "My devices") need migrations 004 and 005. First start applies them. On an existing database (after the role above; safe to run again):
+
+```powershell
+docker compose exec -T postgres psql -U postgres -d radius -v ON_ERROR_STOP=1 -f /migrations/004-portal-signins.sql
+docker compose exec -T postgres psql -U postgres -d radius -v ON_ERROR_STOP=1 -f /migrations/005-device-reviews.sql
 ```
 
 The LDAP account is added when the `ldap` container starts (`docker compose up -d --build ldap`), also on an existing directory.
@@ -330,6 +338,7 @@ docker compose up -d --build
 | `portal/` | Self-service portal: `app.py`, `templates/`, `static/portal.css`, `blocklist.txt`, `requirements.txt` (pinned), `tests/test_portal.py` |
 | `postgres/migrations/003-who-had-ip.sql` | Index and the `who_had_ip` function (used by `scripts/who-had-ip.ps1`) |
 | `postgres/migrations/002-portal-*` | Read-only database role `portal` (SQL) and its password setter (script) |
+| `postgres/migrations/004-portal-signins.sql`, `005-device-reviews.sql` | Function `portal_signins` (the portal's only way into `radpostauth`) and table `device_reviews` (answers to new-device alerts) |
 | `tests/portal-test-user.sh` | Creates and deletes the temporary user for the portal tests |
 | `tests/ldap-checks.sh` | Password-store checks run inside the ldap container (Argon2, NT hash, self-service password change) |
 | `docs/decisions/` | Design decisions, e.g. `0002-ldap-only.md` |

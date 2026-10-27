@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Sign-in activity{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='activity.css') }}">{% endblock %}
+{% block content %}
+<h1>Sign-in activity</h1>
+<p class="lead">Every Wi-Fi login with your ID in the last {{ days }} days, newest first (at most {{ limit }}). If you do not know a login, change your password.</p>
+
+{% if signins %}
+<div class="scroll">
+<table class="signins">
+  <caption class="sr">Wi-Fi logins with your ID</caption>
+  <thead><tr><th scope="col">Time</th><th scope="col">Result</th><th scope="col">Access point</th><th scope="col">Network</th><th scope="col">Device (MAC)</th></tr></thead>
+  <tbody>
+  {% for s in signins %}
+    <tr>
+      <td class="num"><time datetime="{{ s.time.isoformat() if s.time else '' }}">{{ s.time|when }}</time></td>
+      <td>{% if s.result == 'accept' %}<span class="result accept">Accepted</span>{% else %}<span class="result reject">Refused</span>{% endif %}</td>
+      <td class="num">{{ s.ap_mac or '-' }}</td>
+      <td>{{ s.ssid or '-' }}</td>
+      <td class="num device">{{ s.mac or '-' }}{% if s.private_mac %} <span class="tag" title="The device made up this address. It can change, so one device can show more than one address.">private address</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="hint">A "private address" is a random Wi-Fi address that a phone or laptop makes for each network. It is not the address of the hardware.</p>
+{% else %}
+<p>No login with your ID in the last {{ days }} days.</p>
+{% endif %}
+{% endblock %}
