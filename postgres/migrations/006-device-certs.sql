@@ -33,13 +33,18 @@ CREATE TABLE IF NOT EXISTS device_certs (
 	issued_at		timestamp with time zone NOT NULL DEFAULT now(),
 	not_after		timestamp with time zone NOT NULL,
 	revoked_at		timestamp with time zone,
-	revoke_reason		text CHECK (revoke_reason IN ('user', 'not_me', 'admin')),
+	revoke_reason		text CHECK (revoke_reason IN ('user', 'not_me', 'admin', 'password')),
 	via			text NOT NULL CHECK (via IN ('app', 'web')),
 	CHECK (not_after > issued_at),
 	CHECK ((revoked_at IS NULL) = (revoke_reason IS NULL)),
 	-- Target of the foreign key below: a sign-in row always names the certificate's own user
 	UNIQUE (serial, username)
 );
+-- The reasons again, so a table made by an earlier run of this file also allows "password" (a
+-- password change revokes every certificate, pki.revoke_all_core)
+ALTER TABLE device_certs DROP CONSTRAINT IF EXISTS device_certs_revoke_reason_check;
+ALTER TABLE device_certs ADD CONSTRAINT device_certs_revoke_reason_check
+	CHECK (revoke_reason IN ('user', 'not_me', 'admin', 'password'));
 -- The user's certificates (list, and the count of active ones under the advisory lock)
 CREATE INDEX IF NOT EXISTS device_certs_user_idx ON device_certs (username, issued_at);
 
