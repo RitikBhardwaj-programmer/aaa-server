@@ -44,7 +44,7 @@ CERT_LIMIT = 3          # active certificates per user (same number as the 3-dev
 VALID_DAYS = 365
 SEEN_DAYS = 30          # certs_for_mac and the revoke disconnect look this far back
 LABEL_MAX = 40
-REASONS = ("user", "not_me", "admin")
+REASONS = ("user", "not_me", "admin", "password")
 RSA_MIN_BITS, RSA_MAX_BITS = 2048, 8192
 EC_CURVES = (ec.SECP256R1, ec.SECP384R1)
 WEB_KEY_BITS = 3072     # key made on the server for the PKCS#12 download
@@ -241,15 +241,16 @@ def list_core(uid):
         raise core.Unavailable("The certificate list is temporarily unavailable. Try again later.") from None
 
 
-def revoke_core(uid, serial, reason):
-    """Revokes one certificate of this user, then sends a Disconnect-Request for each live session
-    of the devices that signed in with it in the last SEEN_DAYS days.
+def revoke_core(uid, serial, reason, disconnect=True):
+    """Revokes one certificate of this user, then (disconnect=True) sends a Disconnect-Request for
+    each live session of the devices that signed in with it in the last SEEN_DAYS days.
     Returns {"serial", "revoked_at" (datetime), "disconnect": [{"nas", "result"}]}. A second call
     returns the first revoked_at (and reason) and tries the disconnect again.
     Raises InvalidInput (reason), NotFound (no such certificate of this user), Unavailable, and from
-    the disconnect Conflict or RateLimited: the certificate then stays revoked."""
+    the disconnect Conflict or RateLimited: the certificate then stays revoked. With
+    disconnect=False ("Not me", which disconnects the device itself) it never raises those two."""
     if reason not in REASONS:
-        raise core.InvalidInput('reason must be "user", "not_me" or "admin".')
+        raise core.InvalidInput('reason must be "user", "not_me", "admin" or "password".')
     if not isinstance(serial, str) or not SERIAL_RE.fullmatch(serial):
         raise core.NotFound("No certificate of yours has that serial number.")
     try:
@@ -265,7 +266,7 @@ def revoke_core(uid, serial, reason):
                             (serial, uid))
                 rows = cur.fetchall()
             macs = []
-            if rows:
+            if rows and disconnect:
                 cur.execute("""SELECT callingstationid FROM device_cert_seen
                                WHERE serial = %s AND username = %s AND last_seen > now() - make_interval(days => %s)
                                ORDER BY last_seen DESC""", (serial, uid, SEEN_DAYS))
@@ -284,6 +285,39 @@ def revoke_core(uid, serial, reason):
         except (core.NotFound, core.InvalidInput):
             pass                        # that device is not online now
     return {"serial": serial, "revoked_at": rows[0]["revoked_at"], "disconnect": results}
+
+
+def revoke_all_core(uid, reason):
+    """Revokes every active certificate of this user (password change: a stolen password must not
+    leave a certificate behind that outlives it), then tries to disconnect the devices that used
+    them. Returns the revoked serials. Raises InvalidInput (reason) or Unavailable; a failed
+    disconnect is logged and never raised, because the revocation already holds."""
+    if reason not in REASONS:
+        raise core.InvalidInput('reason must be "user", "not_me", "admin" or "password".')
+    try:
+        with core.db() as conn, conn.cursor() as cur:
+            cur.execute("""UPDATE device_certs SET revoked_at = now(), revoke_reason = %s
+                           WHERE username = %s AND revoked_at IS NULL AND not_after > now()
+                           RETURNING serial""", (reason, uid))
+            serials = [r["serial"] for r in cur.fetchall()]
+            macs = []
+            if serials:
+                cur.execute("""SELECT DISTINCT callingstationid FROM device_cert_seen
+                               WHERE serial = ANY(%s) AND username = %s
+                                 AND last_seen > now() - make_interval(days => %s)""",
+                            (serials, uid, SEEN_DAYS))
+                macs = [r["callingstationid"] for r in cur.fetchall()]
+    except psycopg.Error:
+        core.log.exception("database error while revoking all certificates")
+        raise core.Unavailable("Certificates cannot be revoked now. Try again later.") from None
+    for serial in serials:
+        core.log.info("certificate revoked: uid=%s serial=%s reason=%s", uid, serial, reason)
+    for mac in macs:
+        try:
+            core.disconnect_core(uid, mac)
+        except core.PortalError as exc:
+            core.log.warning("revoke all: no disconnect for uid=%s mac=%s (%s)", uid, mac, exc.code)
+    return serials
 
 
 def certs_for_mac(uid, mac):
@@ -359,6 +393,12 @@ def revoke():
     serial = request.form.get("serial", "")
     try:
         result = revoke_core(session["uid"], serial, "user")
+    except (core.Conflict, core.RateLimited):
+        # Raised by the disconnect, after the revocation: the certificate is revoked
+        flash("The certificate was revoked. Devices that use it can no longer join the Wi-Fi.", "ok")
+        flash(f"A disconnect could not be sent now. A device that uses it is dropped at the next "
+              f"re-check, within {core.REAUTH_INTERVAL} seconds.", "info")
+        return redirect(url_for("pki.certs"))
     except core.PortalError as exc:
         flash(exc.message, "error")
         return redirect(url_for("pki.certs"))

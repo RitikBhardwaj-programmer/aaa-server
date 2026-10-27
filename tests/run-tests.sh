@@ -17,6 +17,9 @@ ok()  { echo "  PASS  $1"; pass=$((pass + 1)); }
 bad() { echo "  FAIL  $1"; fail=$((fail + 1)); }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected '$3', got '$2')"; fi; }
 q() { psql -qAt -c "$1"; }
+# On every exit, also an aborted run: no active test certificates (section 11) stay behind
+cleanup() { q "DELETE FROM device_certs WHERE label = 'e2e-$run';" > /dev/null 2>&1; rm -rf "$work"; }
+trap cleanup EXIT
 
 # Accounting goes through the buffered-sql spool, so it reaches PostgreSQL a moment later.
 # wait_for <sql> <expected>: re-runs the query for up to 10 s and prints the last result.
@@ -325,15 +328,31 @@ s_fac=$(tls_cert faculty001 faculty); add_cert "$s_fac" faculty001
 [ "${SEND_VLAN:-yes}" = no ] && vlan="" || vlan=20
 got="$(tls_login faculty001 faculty) $(hex2str "$(attr 81 "$work/out")") $(hex2str "$(attr 25 "$work/out")")"
 check "EAP-TLS faculty001 -> Accept, VLAN ${vlan:-none}, Class faculty" "$got" "SUCCESS $vlan faculty"
+# EAP-TLS is an outer method only (mods-available/inner-eap): inside a tunnel the serial would
+# not be recorded, so revoke-disconnect and "Not me" could not find the device
+cat > "$work/tunnel.conf" <<EOF
+network={
+  key_mgmt=WPA-EAP
+  eap=TTLS
+  identity="faculty001"
+  anonymous_identity="anonymous"
+  ca_cert="/certs/ca.pem"
+  domain_match="$SERVER_NAME"
+  phase2="autheap=TLS"
+  ca_cert2="/certs/ca.pem"
+  client_cert2="$work/faculty.pem"
+  private_key2="$work/faculty.key"
+}
+EOF
+eapol_test -c "$work/tunnel.conf" -a "$RADIUS" -s "$SECRET" -M 02:00:00:00:0C:02 -t 10 > "$work/out" 2>&1
+check "EAP-TLS inside an EAP-TTLS tunnel (active certificate) -> Reject" "$(tail -1 "$work/out")" FAILURE
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=student001" -days 1 \
     -keyout "$work/self.key" -out "$work/self.pem" 2> /dev/null
 check "EAP-TLS with a self-signed certificate -> Reject" "$(tls_login student001 self)" FAILURE
 # The revocation is final: even role radius cannot take it back (trigger of migration 006)
 check "a revoked certificate cannot be brought back" \
       "$(q "UPDATE device_certs SET revoked_at = NULL, revoke_reason = NULL WHERE serial = '$s_ok';" 2>&1 | grep -c 'cannot be changed')" 1
-q "DELETE FROM device_certs WHERE label = 'e2e-$run';" > /dev/null
 
-rm -rf "$work"
 echo
 echo "Result: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

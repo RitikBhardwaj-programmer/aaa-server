@@ -1,0 +1,14 @@
+# EAP inside the PEAP / EAP-TTLS tunnel (sites-available/inner-tunnel): MSCHAPv2 only, for PEAP
+# while ALLOW_PEAP=yes. No TLS, TTLS or PEAP here: EAP-TLS is an outer method only, because only
+# the outer run (tls-device, check-eap-tls) records the certificate serial for revocation.
+# Any other inner EAP type gets a NAK and then a reject.
+eap inner-eap {
+	default_eap_type = mschapv2
+	timer_expire = 60
+	ignore_unknown_eap_types = no
+	max_sessions = ${max_requests}
+
+	mschapv2 {
+		send_error = no
+	}
+}

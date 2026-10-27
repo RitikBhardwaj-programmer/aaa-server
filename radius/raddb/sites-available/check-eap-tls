@@ -42,7 +42,12 @@ authorize {
 			WHERE serial = '%{TLS-Client-Cert-Serial}' AND username = '%{control:Tmp-String-5}' \
 			AND revoked_at IS NULL AND issued_at <= now() AND not_after > now()}:-0}"
 	}
-	if (&control:Tmp-Integer-4 != 1) {
+	# Written the positive way: only exactly 1 passes. In v3 "!= 1" is false when the attribute is
+	# missing, which would fall through to Accept.
+	if (&control:Tmp-Integer-4 == 1) {
+		noop
+	}
+	else {
 		update reply {
 			&Reply-Message := "This certificate is revoked, expired or unknown."
 		}

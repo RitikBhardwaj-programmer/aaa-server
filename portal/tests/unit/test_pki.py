@@ -27,7 +27,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 import app as portal
 import pki
 
-from .helpers import MAC, UID, CoreCase, csrf_token, live_row
+from .helpers import MAC, PASSWORD, UID, CoreCase, csrf_token, live_row
 
 OTHER_UID = "student077"
 OTHER_MAC = "DE-AD-BE-EF-00-09"
@@ -126,6 +126,18 @@ class PkiCursor:
                           reverse=True)
             self.result = [{**{k: r[k] for k in ("serial", "label", "issued_at", "not_after", "revoked_at",
                                                  "revoke_reason", "via")}, "active": db.active(r)} for r in rows]
+        elif sql1.startswith("UPDATE device_certs SET revoked_at") and len(params) == 2:   # revoke_all_core
+            reason, user = params
+            self.result = []
+            for r in db.certs:
+                if r["username"] == user and db.active(r):
+                    r["revoked_at"], r["revoke_reason"] = db.now(), reason
+                    self.result.append({"serial": r["serial"]})
+        elif sql1.startswith("SELECT DISTINCT callingstationid FROM device_cert_seen"):
+            serials, user, days = params
+            self.result = [{"callingstationid": m} for m in sorted({
+                s["mac"] for s in db.seen if s["serial"] in serials and s["username"] == user
+                and s["last_seen"] > db.now() - timedelta(days=days)})]
         elif sql1.startswith("UPDATE device_certs SET revoked_at"):
             reason, serial, user = params
             self.result = []
@@ -531,6 +543,59 @@ class ListAndRevokeTests(PkiCase):
         with self.assertRaises(portal.NotFound):
             pki.revoke_core(OTHER_UID, serial, "user")
 
+    def test_revoke_core_without_disconnect(self):
+        serial = self.add_cert()
+        self.pdb.seen.append({"serial": serial, "username": UID, "mac": MAC, "last_seen": datetime.now(timezone.utc)})
+        self.pdb.live[UID] = [live_row(MAC)]
+        portal.DISCONNECTS_RUNNING.add(UID)             # would be 409 with the disconnect
+        self.addCleanup(portal.DISCONNECTS_RUNNING.discard, UID)
+        result = pki.revoke_core(UID, serial, "not_me", disconnect=False)
+        self.assertEqual(result["disconnect"], [])
+        self.assertEqual(self.pdb.certs[0]["revoke_reason"], "not_me")
+        self.mocks["send_disconnect"].assert_not_called()
+
+    def test_revoke_all_core_revokes_every_active_cert_of_the_user_only(self):
+        now = datetime.now(timezone.utc)
+        a, b = self.add_cert(), self.add_cert()
+        old, expired, theirs = self.add_cert(revoked=True), self.add_cert(expired=True), self.add_cert(user=OTHER_UID)
+        self.pdb.seen += [{"serial": a, "username": UID, "mac": MAC, "last_seen": now},
+                          {"serial": b, "username": UID, "mac": MAC, "last_seen": now}]
+        self.pdb.live[UID] = [live_row(MAC)]
+        self.assertEqual(sorted(pki.revoke_all_core(UID, "password")), sorted([a, b]))
+        reasons = {r["serial"]: r["revoke_reason"] for r in self.pdb.certs}
+        self.assertEqual((reasons[a], reasons[b], reasons[old], reasons[expired], reasons[theirs]),
+                         ("password", "password", "user", None, None))
+        sent = [c.args[1]["callingstationid"] for c in self.mocks["send_disconnect"].call_args_list]
+        self.assertEqual(sent, [MAC])                   # each device once
+        self.assertEqual(pki.revoke_all_core(UID, "password"), [])
+        with self.assertRaises(portal.InvalidInput):
+            pki.revoke_all_core(UID, "because")
+
+    def test_revoke_all_core_keeps_the_revocation_when_the_disconnect_fails(self):
+        serial = self.add_cert()
+        self.pdb.seen.append({"serial": serial, "username": UID, "mac": MAC, "last_seen": datetime.now(timezone.utc)})
+        self.pdb.live[UID] = [live_row(MAC)]
+        portal.DISCONNECTS_RUNNING.add(UID)
+        self.addCleanup(portal.DISCONNECTS_RUNNING.discard, UID)
+        self.assertEqual(pki.revoke_all_core(UID, "password"), [serial])
+        self.assertIsNotNone(self.pdb.certs[0]["revoked_at"])
+
+    def test_password_change_revokes_every_certificate(self):
+        a, b, theirs = self.add_cert(), self.add_cert(), self.add_cert(user=OTHER_UID)
+        resp = self.client.post("/api/v1/password", json={"old": PASSWORD, "new": "purple tractor rain 42"},
+                                headers=self.bearer(self.token))
+        self.assertEqual(resp.status_code, 204, resp.get_data(as_text=True))
+        reasons = {r["serial"]: r["revoke_reason"] for r in self.pdb.certs}
+        self.assertEqual((reasons[a], reasons[b], reasons[theirs]), ("password", "password", None))
+
+    def test_password_change_stands_when_revoking_fails(self):
+        self.add_cert()
+        with mock.patch.object(pki, "revoke_all_core", side_effect=portal.Unavailable("down")):
+            resp = self.client.post("/api/v1/password", json={"old": PASSWORD, "new": "purple tractor rain 42"},
+                                    headers=self.bearer(self.token))
+        self.assertEqual(resp.status_code, 204)
+        self.mocks["change_password"].assert_called_once()
+
     def test_certs_for_mac(self):
         now = datetime.now(timezone.utc)
         recent, revoked, old, theirs, other_mac = (self.add_cert(), self.add_cert(revoked=True), self.add_cert(),
@@ -643,6 +708,20 @@ class WebTests(PkiCase):
         resp = self.client.post("/certs/revoke", data={"csrf_token": token, "serial": theirs}, follow_redirects=True)
         self.assertIn("No certificate of yours", resp.get_data(as_text=True))
         self.assertIsNone(self.pdb.certs[1]["revoked_at"])
+
+    def test_revoke_from_the_page_while_a_disconnect_runs_says_revoked(self):
+        serial = self.add_cert()
+        self.pdb.seen.append({"serial": serial, "username": UID, "mac": MAC, "last_seen": datetime.now(timezone.utc)})
+        self.pdb.live[UID] = [live_row(MAC)]
+        portal.DISCONNECTS_RUNNING.add(UID)
+        self.addCleanup(portal.DISCONNECTS_RUNNING.discard, UID)
+        token = csrf_token(self.client, "/certs")
+        html = self.client.post("/certs/revoke", data={"csrf_token": token, "serial": serial},
+                                follow_redirects=True).get_data(as_text=True)
+        self.assertIn("The certificate was revoked", html)
+        self.assertIn("A disconnect could not be sent now", html)
+        self.assertNotIn("in progress", html)
+        self.assertIsNotNone(self.pdb.certs[0]["revoked_at"])
 
     def test_nav_link(self):
         self.assertIn('href="/certs"', self.client.get("/certs").get_data(as_text=True))
