@@ -9,18 +9,34 @@
 --   docker compose exec -T postgres psql -U postgres -d radius -v ON_ERROR_STOP=1 -f /migrations/004-portal-signins.sql
 -- The objects are made as role radius (SET ROLE below), so the function runs with the rights of
 -- radius, the owner of radpostauth, and never with superuser rights.
+-- One transaction: PUBLIC can never run the function between CREATE and REVOKE.
 
+BEGIN;
 SET ROLE radius;
 
--- search_path is pinned, so a caller cannot put its own "radpostauth" or operators earlier in the
--- path. p_days is clamped to 1..30 and p_limit to 1..100; NULL gives 7 days and 100 rows.
+-- Functions that radius makes later are not executable by PUBLIC either (a new overload included)
+ALTER DEFAULT PRIVILEGES FOR ROLE radius REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+
+-- Enforce, not assume, that the portal cannot read radpostauth: the table and every partition
+-- (a REVOKE on the parent does not reach the partitions)
+DO $$
+DECLARE part regclass;
+BEGIN
+	REVOKE ALL ON radpostauth FROM portal;
+	FOR part IN SELECT inhrelid::regclass FROM pg_inherits WHERE inhparent = 'radpostauth'::regclass LOOP
+		EXECUTE format('REVOKE ALL ON %s FROM portal', part);
+	END LOOP;
+END $$;
+
+-- search_path is pinned (pg_temp last), so a caller cannot put its own "radpostauth" or operators
+-- earlier in the path. p_days is clamped to 1..30 and p_limit to 1..100; NULL gives 7 days and 100 rows.
 CREATE OR REPLACE FUNCTION portal_signins(p_user text, p_days integer, p_limit integer)
 RETURNS TABLE (
 	authdate		timestamp with time zone,
 	reply			text,
 	calledstationid		text,
 	callingstationid	text
-) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 	SELECT r.authdate, r.reply, r.calledstationid, r.callingstationid
 	FROM public.radpostauth r
 	WHERE r.username = p_user
@@ -34,3 +50,4 @@ REVOKE ALL ON FUNCTION portal_signins(text, integer, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION portal_signins(text, integer, integer) TO portal;
 
 RESET ROLE;
+COMMIT;

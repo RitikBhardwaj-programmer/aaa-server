@@ -70,7 +70,7 @@ class ActivityDatabaseTests(unittest.TestCase):
             row = conn.execute("""SELECT prosecdef, proconfig, pg_get_userbyid(proowner),
                                          has_function_privilege('public', p.oid, 'EXECUTE')
                                   FROM pg_proc p WHERE proname = 'portal_signins'""").fetchone()
-        self.assertEqual(row, (True, ["search_path=pg_catalog, public"], "radius", False))
+        self.assertEqual(row, (True, ["search_path=pg_catalog, public, pg_temp"], "radius", False))
 
     def test_portal_signins_returns_only_four_columns_of_one_user(self):
         with portal.db() as conn, conn.cursor() as cur:

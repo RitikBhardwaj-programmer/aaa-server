@@ -295,7 +295,7 @@ class PasswordTests(ApiCase):
     def test_change_ends_every_token_and_web_session(self):
         other_token = self.api_token()
         web = self.web_client()
-        self.db_results = [[], [], []]
+        self.db_results = [[], [], [], []]       # the last one: new-device alerts (activity.py)
         self.assertEqual(web.get("/devices").status_code, 200)
         self.assertEqual(self.change().status_code, 204)
         for token in (self.token, other_token):
