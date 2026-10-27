@@ -1,0 +1,40 @@
+/* Device certificates page (/certs, pki.py). Uses the tokens of portal.css. */
+
+/* The one-time result: "lit" like a filled device slot */
+.issued {
+  margin: 1.25rem 0 2rem; padding: 1rem 1.25rem .25rem;
+  background: var(--paper); border: 2px solid var(--ink); border-top: 8px solid var(--kesar);
+}
+.issued h2 { margin: 0 0 .75rem; }
+.passphrase-label { margin: 0 0 .25rem; font-weight: 600; color: var(--slate); }
+.passphrase code {
+  display: inline-block; padding: .5rem .75rem;
+  font-family: ui-monospace, Consolas, monospace; font-size: 1.35rem; letter-spacing: .06em;
+  background: var(--snow); border-left: 5px solid var(--kesar); white-space: nowrap;
+}
+@media (max-width: 40rem) {
+  .passphrase code { font-size: 1.05rem; letter-spacing: .02em; padding: .5rem; }
+  .issued { padding: .75rem .9rem .25rem; }
+}
+
+a.download {
+  display: inline-block; padding: .6rem 1.2rem;
+  font-family: var(--display); font-size: 1.05rem; font-weight: 600; letter-spacing: .02em;
+  color: var(--snow); background: var(--ink); text-decoration: none;
+  border-bottom: 4px solid var(--kesar); border-radius: 3px;
+}
+a.download:hover { background: #0b262b; }
+
+.steps { margin: 0 0 1rem; padding-left: 1.25rem; max-width: 38rem; }
+.steps li { margin-bottom: .35rem; }
+
+/* The list: fits the page width (no sideways scrolling), long names wrap */
+.scroll { position: relative; }
+table.certs td { white-space: normal; vertical-align: top; }
+table.certs td:last-child { text-align: right; }
+table.certs td.num, table.certs time { white-space: nowrap; }
+.label { font-weight: 600; overflow-wrap: anywhere; }
+.meta { display: block; font-size: .8rem; color: var(--slate); }
+.meta code { font-size: .8rem; }
+td form { margin: 0; }
+input[type=text] + .hint { margin-top: .4rem; }

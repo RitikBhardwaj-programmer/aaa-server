@@ -1,7 +1,9 @@
 # Runs the test suites against the running stack:
 #   1. tests/ldap-checks.sh inside the ldap container (password store: Argon2, NT hash, password change)
-#   2. portal/tests/test_portal.py in the portal-test container (self-service portal, with a temporary user)
-#   3. tests/run-tests.sh in the tests container (end-to-end 802.1X, accounting, limits)
+#   2. portal/tests/test_*.py in the portal-test container (self-service portal, API, activity, device
+#      certificates; with a temporary user)
+#   3. tests/run-tests.sh in the tests container (end-to-end 802.1X incl. EAP-TLS, accounting, limits)
+# Needs certs/device-ca.pem and device-ca.key (scripts/init.ps1 adds them to an existing lab).
 # Exit codes are checked below. 'Continue' because docker writes progress to stderr, which
 # Windows PowerShell 5.1 would otherwise turn into a fatal error.
 $ErrorActionPreference = 'Continue'

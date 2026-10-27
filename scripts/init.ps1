@@ -49,11 +49,13 @@ if (Test-Path $envFile) {
     Write-Host 'Created .env with random secrets. Edit AP_IP to match your access point.'
 }
 
-if (Test-Path (Join-Path $root 'certs/server.pem')) {
-    Write-Host 'Certificates already exist - keeping them.'
-} else {
-    Write-Host 'Generating lab CA and RADIUS server certificate...'
+# make-certs.sh adds only the files that are missing (an update can add new ones, such as the
+# Device CA of stage S5) and never overwrites one
+if (@('server.pem', 'profile-sign.pem', 'device-ca.pem') | Where-Object { -not (Test-Path (Join-Path $root "certs/$_")) }) {
+    Write-Host 'Generating the missing lab certificates...'
     docker run --rm -v "${root}/certs:/certs" --entrypoint sh freeradius/freeradius-server:3.2.10 /certs/make-certs.sh
     if ($LASTEXITCODE -ne 0) { throw 'Certificate generation failed.' }
+} else {
+    Write-Host 'Certificates already exist - keeping them.'
 }
 Write-Host 'Done. Next: docker compose up -d --build'

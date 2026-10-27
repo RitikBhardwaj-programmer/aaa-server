@@ -1,0 +1,74 @@
+# Certificate check for EAP-TLS (stage S5). The eap module runs this server once per login, after
+# the TLS handshake has verified the client certificate (mods-available/eap, tls-device: chain to
+# the Device CA, issuer, CN = User-Name). An Access-Accept from here lets the login continue; any
+# other result rejects it. The reply attributes set here go into the outer Access-Accept.
+#
+#   1. LDAP: the user exists (stored uid in control:Tmp-String-5, the DN for the group checks).
+#      The CN must be exactly the stored uid: the portal writes that form (portal/pki.py).
+#   2. device_certs (migration 006): the serial is there for this user, not revoked and not expired.
+#      This lookup is the revocation check: there is no CRL or OCSP service. A revoke in the portal
+#      takes effect at the device's next login or re-check (REAUTH_INTERVAL), or at once with the
+#      Disconnect-Request the portal sends. PostgreSQL down -> reject: unlike the device limit,
+#      this check fails closed.
+#   3. campus_authorize (policy.d/campus): disabled -> reject; group -> VLAN, Class, re-check
+#      interval; and the device limit. The same policy as for EAP-TTLS.
+#   4. Reply User-Name = stored uid (accounting), and the serial in reply:Tmp-String-7, an internal
+#      attribute that is never sent: sites-available/default records it in device_cert_seen.
+server check-eap-tls {
+
+authorize {
+	ldap
+	if (!ok && !updated) {
+		update reply {
+			&Reply-Message := "Unknown user."
+		}
+		reject
+	}
+
+	if (!&TLS-Client-Cert-Common-Name || !&control:Tmp-String-5 || \
+	    (&TLS-Client-Cert-Common-Name != &control:Tmp-String-5)) {
+		update reply {
+			&Reply-Message := "The certificate is not for this user."
+		}
+		reject
+	}
+
+	if (!&TLS-Client-Cert-Serial) {
+		reject
+	}
+	# COUNT(*) always gives one row; with PostgreSQL down the value is empty, so 0 (reject)
+	update control {
+		&Tmp-Integer-4 := "%{%{sql:SELECT COUNT(*) FROM device_certs \
+			WHERE serial = '%{TLS-Client-Cert-Serial}' AND username = '%{control:Tmp-String-5}' \
+			AND revoked_at IS NULL AND issued_at <= now() AND not_after > now()}:-0}"
+	}
+	# Written the positive way: only exactly 1 passes. In v3 "!= 1" is false when the attribute is
+	# missing, which would fall through to Accept.
+	if (&control:Tmp-Integer-4 == 1) {
+		noop
+	}
+	else {
+		update reply {
+			&Reply-Message := "This certificate is revoked, expired or unknown."
+		}
+		reject
+	}
+
+	campus_authorize
+
+	update reply {
+		&User-Name := &control:Tmp-String-5
+		&Tmp-String-7 := &TLS-Client-Cert-Serial
+	}
+	update control {
+		&Auth-Type := Accept
+	}
+}
+
+post-auth {
+	Post-Auth-Type REJECT {
+		# The reason (Reply-Message) stays in the server log; the outer server removes it for EAP
+		ok
+	}
+}
+}

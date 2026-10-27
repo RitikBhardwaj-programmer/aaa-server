@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Device certificates{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='certs.css') }}">{% endblock %}
+{% block content %}
+{# pki.certs / pki.new: certs is newest first (None when the list could not be read after an issue) #}
+<h1>Device certificates</h1>
+<p class="lead">A device certificate lets one device join the Wi-Fi without your password (EAP-TLS). You can have {{ limit }} active certificates. The Android app gets its own; use this page for an iPhone, iPad, Mac, Windows or Linux device.</p>
+
+{% if issued %}
+<section class="issued" aria-labelledby="issued-title">
+  <h2 id="issued-title">Certificate "{{ issued.label }}" is ready</h2>
+  <p><strong>This page is the only time the file and its passphrase are shown.</strong> They are not stored anywhere: if you leave this page before you install the file, revoke the certificate below and make a new one.</p>
+  <p class="passphrase-label">Passphrase</p>
+  <p class="passphrase"><code>{{ passphrase }}</code></p>
+  <p><a class="download" href="data:application/x-pkcs12;base64,{{ p12_b64 }}" download="{{ filename }}">Download the certificate (.p12)</a></p>
+  <ol class="steps">
+    <li>Open the file on the device it is for. Type the passphrase exactly as shown, with the dashes.</li>
+    <li>Set up the Wi-Fi as EAP-TLS: identity <strong>{{ session.uid }}</strong>, this certificate, and the lab CA{% if has_endpoint('downloads.setup') %} (from <a href="{{ url_for('downloads.setup') }}">Set up Wi-Fi</a>){% endif %} to check the server name radius.nitsrinagar.lab.</li>
+    <li>Do not give the file or the passphrase to another person. Anyone with both can join the Wi-Fi as you, until you revoke the certificate.</li>
+  </ol>
+</section>
+{% endif %}
+
+<p class="count">{{ active }} of {{ limit }} certificates active</p>
+
+{% if certs is none %}
+<p class="note info">The certificate list is temporarily unavailable. Reload this page in a moment.</p>
+{% elif certs %}
+<div class="scroll">
+<table class="certs">
+  <thead><tr><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Expires</th><th scope="col" aria-label="Action"></th></tr></thead>
+  <tbody>
+  {% for c in certs %}
+  <tr>
+    <td><span class="label">{{ c.label }}</span>
+      <span class="meta">{{ 'Android app' if c.via == 'app' else 'This page' }}, issued <time datetime="{{ c.issued_at.isoformat() }}">{{ c.issued_at.strftime('%Y-%m-%d') }}</time> · <code title="Serial number {{ c.serial }}">{{ c.serial[:12] }}…</code></span></td>
+    <td>{% if c.active %}<span class="on">Active</span>{% elif c.revoked_at %}Revoked<span class="meta"><time datetime="{{ c.revoked_at.isoformat() }}">{{ c.revoked_at|when }}</time></span>{% else %}Expired{% endif %}</td>
+    <td class="num"><time datetime="{{ c.not_after.isoformat() }}">{{ c.not_after.strftime('%Y-%m-%d') }}</time></td>
+    <td>{% if c.active %}
+      <form method="post" action="{{ url_for('pki.revoke') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="serial" value="{{ c.serial }}">
+        <button type="submit" class="secondary" aria-label="Revoke certificate {{ c.label }}">Revoke</button>
+      </form>
+    {% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="hint">Revoke a certificate when you lose the device or stop using it. The access point is asked to drop a device that uses it at once; otherwise it is dropped at the next re-check.</p>
+{% else %}
+<p class="hint">You have no certificates yet.</p>
+{% endif %}
+
+{% if not issued and (certs is none or active < limit) %}
+<section aria-labelledby="new-title">
+  <h2 id="new-title">New certificate</h2>
+  <form method="post" action="{{ url_for('pki.new') }}" class="stack narrow">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="label">Device name</label>
+    <input id="label" name="label" type="text" maxlength="{{ label_max }}" required aria-describedby="label-hint">
+    <p id="label-hint" class="hint">For example "MacBook" or "Lab PC". 1 to {{ label_max }} characters.</p>
+    <button type="submit" class="primary">Make certificate</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
