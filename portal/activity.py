@@ -8,11 +8,13 @@
   review (device_reviews, migration 005). The devices page shows all alerts in one banner.
 - "This was me" records the verdict "me". "Not me" records "not_me", disconnects the device if it is
   online (core.disconnect_core: same checks and limits as Disconnect), and sends the user to the
-  password page.
+  password page. When pki.py (stage S5) is loaded, "Not me" also revokes the user's certificates
+  that this device used to sign in (pki.certs_for_mac, pki.revoke_core with reason "not_me").
 
 The web pages and the API call the same core functions (signins_core, alerts_core, review_core).
 """
 import re
+import sys
 
 import psycopg
 from flask import Blueprint, flash, g, jsonify, redirect, render_template, request, session, url_for
@@ -53,6 +55,40 @@ def split_station(called):
     if m is None:
         return called, None
     return m.group(1), m.group(2) or None
+
+
+def pki_module():
+    """The pki feature module (stage S5) when the portal loaded it, else None."""
+    if "pki" not in core.app.blueprints:
+        return None
+    return sys.modules.get("pki")
+
+
+def revoke_device_certs(uid, mac):
+    """Revokes the user's active certificates that the device `mac` used to sign in.
+    Returns {"revoked": [serial], "revoke_failed": [serial]}, or None when pki.py is not loaded.
+    Never raises: the "not_me" verdict is already recorded, and the user must still get to the
+    password page. A serial that cannot be revoked is logged and listed in revoke_failed; when
+    even the list of serials cannot be read, revoke_failed is ["*"]."""
+    pki = pki_module()
+    if pki is None:
+        return None
+    try:
+        serials = list(pki.certs_for_mac(uid, mac))
+    except Exception:                    # any fault of pki.py must not undo the verdict
+        core.log.exception("not_me: cannot list the certificates of uid=%s mac=%s", uid, mac)
+        return {"revoked": [], "revoke_failed": ["*"]}
+    revoked, failed = [], []
+    for serial in serials:
+        try:
+            pki.revoke_core(uid, serial, "not_me")
+        except Exception:
+            core.log.exception("not_me: cannot revoke certificate %s of uid=%s", serial, uid)
+            failed.append(serial)
+        else:
+            core.log.info("not_me: certificate revoked: uid=%s mac=%s serial=%s", uid, mac, serial)
+            revoked.append(serial)
+    return {"revoked": revoked, "revoke_failed": failed}
 
 
 def iso(value):
@@ -108,9 +144,13 @@ def alerts_core(uid):
 
 def review_core(uid, mac, verdict):
     """Records the user's answer for one of their devices. A second answer replaces the first.
-    For "not_me" it then disconnects the device if it is online.
-    Returns {"mac", "verdict", "disconnect", "next"}. Raises InvalidInput, NotFound, Unavailable,
-    and for "not_me" also Conflict or RateLimited from the disconnect (the verdict stays recorded)."""
+    For "not_me" it then revokes the device's certificates (when pki.py is loaded) and disconnects
+    the device if it is online. The revocation comes first: a revoked certificate cannot sign in
+    again, and a failed revocation never stops the disconnect.
+    Returns {"mac", "verdict", "disconnect", "next", "revoked", "revoke_failed"} (the last two are
+    null for "me" and without pki.py). Raises InvalidInput, NotFound, Unavailable, and for
+    "not_me" also Conflict or RateLimited from the disconnect (the verdict stays recorded, and the
+    revocation is already done)."""
     if verdict not in VERDICTS:
         raise core.InvalidInput('verdict must be "me" or "not_me".')
     if not isinstance(mac, str) or not core.MAC_RE.fullmatch(mac):
@@ -136,12 +176,14 @@ def review_core(uid, mac, verdict):
         raise core.NotFound("No device of yours was found with that address.")
     core.log.info("device review: uid=%s mac=%s verdict=%s", uid, mac, verdict)
     if verdict == "me":
-        return {"mac": mac, "verdict": verdict, "disconnect": None, "next": None}
+        return {"mac": mac, "verdict": verdict, "disconnect": None, "next": None,
+                "revoked": None, "revoke_failed": None}
+    certs = revoke_device_certs(uid, mac) or {"revoked": None, "revoke_failed": None}
     try:
         results = core.disconnect_core(uid, mac)
     except core.NotFound:
         results = []                    # not online now
-    return {"mac": mac, "verdict": verdict, "disconnect": results, "next": "password"}
+    return {"mac": mac, "verdict": verdict, "disconnect": results, "next": "password", **certs}
 
 
 # ---- Web pages ------------------------------------------------------------------------------------
@@ -180,6 +222,16 @@ def flash_disconnect(mac, results):
                   f"next re-check, within {core.REAUTH_INTERVAL} seconds.", "info")
 
 
+def flash_revoked(mac, result):
+    if result["revoked"]:
+        n = len(result["revoked"])
+        flash(f"{mac}: {n} device certificate{'s' if n > 1 else ''} revoked. "
+              "It can no longer sign in with a certificate.", "ok")
+    if result["revoke_failed"]:
+        flash(f"{mac}: a device certificate could not be revoked. Revoke it on the Device certificates "
+              "page.", "error")
+
+
 @bp.route("/activity/review", methods=["POST"])
 @core.login_required
 def review():
@@ -198,6 +250,7 @@ def review():
         flash(f"{mac}: marked as your device.", "ok")
         return redirect(url_for("devices"))
     flash_disconnect(mac, result["disconnect"])
+    flash_revoked(mac, result)
     flash("Someone else may know your password. Change it now, so that the device cannot sign in again.",
           "error")
     return redirect(url_for("password"))
