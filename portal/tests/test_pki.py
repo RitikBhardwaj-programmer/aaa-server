@@ -169,6 +169,17 @@ class PkiDatabaseTests(PkiLiveCase):
             pki.revoke_core(UID, theirs, "user")
         self.assertIsNone(radius_rows("SELECT revoked_at FROM device_certs WHERE serial = %s", (theirs,))[0][0])
 
+    def test_revoke_all_core_with_the_real_constraints(self):
+        # The CHECK on revoke_reason and the guard trigger: the unit tests' fake database has neither
+        a, b, old = self.add_cert(), self.add_cert(), self.add_cert(revoked=True)
+        theirs = self.add_cert(user=OTHER_UID)
+        self.assertEqual(sorted(pki.revoke_all_core(UID, "password")), sorted([a, b]))
+        reasons = dict(radius_rows("SELECT serial, revoke_reason FROM device_certs WHERE serial = ANY(%s)",
+                                   ([a, b, old, theirs],)))
+        self.assertEqual((reasons[a], reasons[b], reasons[old], reasons[theirs]),
+                         ("password", "password", "admin", None))
+        self.assertEqual(pki.revoke_all_core(UID, "password"), [])
+
     def test_certs_for_mac(self):
         recent, revoked, old = self.add_cert(), self.add_cert(revoked=True), self.add_cert()
         theirs = self.add_cert(user=OTHER_UID)
