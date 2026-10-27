@@ -1,0 +1,32 @@
+/* Sign-in activity page and the new-device banner (activity.py). Uses the tokens of portal.css. */
+
+/* ---- Banner on the devices page --------------------------------------------------------------- */
+.alerts { max-width: none; border-left-width: 8px; }
+.alerts h2 { margin: 0 0 .5rem; }
+.alert-list { list-style: none; margin: 0 0 .75rem; padding: 0; }
+.alert-list li { padding: .75rem 0; border-top: 1px solid var(--rule); }
+.alert-list li:last-child { border-bottom: 1px solid var(--rule); }
+.alert-list p { margin: 0 0 .35rem; }
+.alert-mac { font-family: var(--display); font-weight: 600; font-size: 1.1rem; overflow-wrap: anywhere; }
+.alert-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+button.secondary.danger { border-color: var(--chinar); color: var(--chinar); }
+button.secondary.danger:hover { background: var(--snow); }
+
+/* ---- Labels ----------------------------------------------------------------------------------- */
+.num { font-variant-numeric: tabular-nums; }
+.tag {
+  display: inline-block; padding: 0 .4rem; margin-left: .25rem;
+  font-family: var(--text); font-size: .75rem; font-weight: 600; line-height: 1.5;
+  color: var(--slate); border: 1px solid var(--slate); border-radius: 2px; white-space: nowrap;
+}
+.result { font-weight: 600; }
+.result.accept { color: var(--willow); }
+.result.reject { color: var(--chinar); }
+
+@media (max-width: 40rem) {
+  .alert-actions button { flex: 1 1 auto; }
+}
+
+/* ---- Sign-in table: the label goes under the MAC, so the table fits the page ------------------- */
+.signins td.device { white-space: normal; }
+.signins td.device .tag { display: block; width: max-content; margin: .15rem 0 0; }

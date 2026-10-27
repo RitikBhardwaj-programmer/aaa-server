@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Set up Wi-Fi{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='setup.css') }}">{% endblock %}
+{% block content %}
+{# downloads.setup: platforms is in display order; the detected OS (if any) is first #}
+{% set names = {'apple': 'iPhone, iPad and Mac', 'windows': 'Windows 10 and 11', 'linux': 'Linux (NetworkManager)',
+                'chromeos': 'Chromebook', 'android': 'Android'} %}
+<h1>Set up Wi-Fi</h1>
+<p class="lead">These files set up {{ s.ssid }} for <strong>{{ s.uid }}</strong>. They do not contain your password. Your device asks for it when it connects. Do not give these files to another person.</p>
+
+{% macro platform(key, first) %}
+<section class="platform{% if first %} first{% endif %}" aria-labelledby="p-{{ key }}">
+  {% if first and detected %}<p class="tag">For this device</p>{% endif %}
+  <h2 id="p-{{ key }}">{{ names[key] }}</h2>
+  {% if key == 'apple' %}
+  <p><a class="download" href="{{ url_for('downloads.apple') }}">Download the profile (.mobileconfig)</a></p>
+  <ol class="steps">
+    <li>iPhone or iPad: open Settings &gt; Profile Downloaded. Mac: open System Settings &gt; Privacy &amp; Security &gt; Profiles.</li>
+    <li>Tap or click Install.{% if signed %} The profile is signed by the lab CA, so the device can show "Not Verified" before the CA is installed. This is expected for this lab.{% else %} The profile is not signed, so the device shows "Unsigned".{% endif %}</li>
+    <li>When the device asks for a password, type your Wi-Fi password.</li>
+  </ol>
+  {% elif key == 'windows' %}
+  <p><a class="download" href="{{ url_for('downloads.windows_ps1') }}">Download the setup script (.ps1)</a></p>
+  <ol class="steps">
+    <li>Right-click the file, then select Run with PowerShell.</li>
+    <li>Windows shows a security warning for the "NIT Srinagar Lab CA". Make sure that the thumbprint is the SHA-1 value below, then click Yes.</li>
+    <li>Connect to {{ s.ssid }}. Type the user name <strong>{{ s.uid }}</strong> and your password.</li>
+  </ol>
+  <p class="hint">For administrators: the <a href="{{ url_for('downloads.windows_xml') }}">WLAN profile (.xml)</a> only, for <code>netsh wlan add profile</code>. It needs the CA in the trusted root store first.</p>
+  {% elif key == 'linux' %}
+  <p><a class="download" href="{{ url_for('downloads.linux') }}">Download the setup script (.sh)</a></p>
+  <ol class="steps">
+    <li>Open a terminal and run <code>bash nits-wifi-setup.sh</code> from your download folder.</li>
+    <li>Connect to {{ s.ssid }}. NetworkManager asks for your password.</li>
+  </ol>
+  {% elif key == 'chromeos' %}
+  <p><a class="download" href="{{ url_for('downloads.chromeos') }}">Download the network file (.onc)</a></p>
+  <ol class="steps">
+    <li>Open <code>chrome://network</code> in the browser.</li>
+    <li>Under Import ONC file, select the file.</li>
+    <li>Connect to {{ s.ssid }} and type your password.</li>
+  </ol>
+  {% elif key == 'android' %}
+  <p>Use the NIT Srinagar Wi-Fi app: it sets up the network for you. To set it up by hand, use the settings below and install the lab CA from the IT desk.</p>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% for key in platforms %}{{ platform(key, loop.first) }}{% endfor %}
+
+<h2>Check the settings</h2>
+<p>A correct setup never connects without these checks. If your device asks you to trust another server or certificate, stop and do not type your password.</p>
+<dl class="settings">
+  <dt>Network</dt><dd>{{ s.ssid }} (WPA2-Enterprise)</dd>
+  <dt>Method</dt><dd>EAP-TTLS, inner method PAP</dd>
+  <dt>Identity</dt><dd>{{ s.uid }}</dd>
+  <dt>Anonymous identity</dt><dd>{{ s.anonymous_identity }}</dd>
+  <dt>Server name (domain)</dt><dd>{{ s.server_name }}</dd>
+  <dt>CA certificate</dt><dd>NIT Srinagar Lab CA</dd>
+  <dt>CA SHA-1</dt><dd class="hash">{{ sha1 }}</dd>
+  <dt>CA SHA-256</dt><dd class="hash">{{ sha256 }}</dd>
+</dl>
+{% endblock %}

@@ -1,0 +1,35 @@
+/* Set up Wi-Fi page (/setup, downloads.py). Uses the tokens of portal.css. */
+
+.platform {
+  margin: 1.25rem 0; padding: 1rem 1.25rem .25rem;
+  background: var(--paper); border: 2px solid var(--rule);
+}
+/* The platform of this device: "lit" like a filled device slot */
+.platform.first { border-color: var(--ink); border-top: 8px solid var(--kesar); }
+.platform h2 { margin: 0 0 .75rem; }
+.tag {
+  margin: 0 0 .25rem; font-size: .8rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--slate);
+}
+
+a.download {
+  display: inline-block; padding: .6rem 1.2rem;
+  font-family: var(--display); font-size: 1.05rem; font-weight: 600; letter-spacing: .02em;
+  color: var(--snow); background: var(--ink); text-decoration: none;
+  border-bottom: 4px solid var(--kesar); border-radius: 3px;
+}
+a.download:hover { background: #0b262b; }
+.platform:not(.first) a.download { color: var(--ink); background: transparent; border: 2px solid var(--ink); }
+.platform:not(.first) a.download:hover { background: var(--snow); }
+
+.steps { margin: 0 0 1rem; padding-left: 1.25rem; max-width: 38rem; }
+.steps li { margin-bottom: .35rem; }
+code { font-size: .9em; overflow-wrap: anywhere; }
+
+.settings {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .3rem 1rem;
+  margin: 0; padding: 1rem 1.25rem; background: var(--paper); border-left: 5px solid var(--kesar);
+}
+.settings dt { color: var(--slate); }
+.settings dd { margin: 0; overflow-wrap: anywhere; }
+.settings .hash { font-family: ui-monospace, Consolas, monospace; font-size: .85rem; }
