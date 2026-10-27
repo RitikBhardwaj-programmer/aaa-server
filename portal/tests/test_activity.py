@@ -157,7 +157,10 @@ class ActivityPageTests(unittest.TestCase):
         self.assertEqual(api.post(f"/api/v1/alerts/{OTHER_MAC}", json={"verdict": "me"}, headers=headers).status_code,
                          404)
         body = api.post(f"/api/v1/alerts/{MY_PRIVATE_MAC}", json={"verdict": "not_me"}, headers=headers).get_json()
-        self.assertEqual(body, {"mac": MY_PRIVATE_MAC, "verdict": "not_me", "disconnect": [], "next": "password"})
+        # revoked / revoke_failed: lists when pki.py (S5) is loaded, null without it (section 7)
+        certs = [] if "pki" in portal.app.blueprints else None
+        self.assertEqual(body, {"mac": MY_PRIVATE_MAC, "verdict": "not_me", "disconnect": [], "next": "password",
+                                "revoked": certs, "revoke_failed": certs})
         self.assertEqual(api.get("/api/v1/alerts", headers=headers).get_json()["count"], 0)
         with radius_db() as conn:
             self.assertEqual(conn.execute("SELECT count(*) FROM device_reviews WHERE username = %s",

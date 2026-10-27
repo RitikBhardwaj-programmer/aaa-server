@@ -13,6 +13,12 @@
   <p class="passphrase-label">Passphrase</p>
   <p class="passphrase"><code>{{ passphrase }}</code></p>
   <p><a class="download" href="data:application/x-pkcs12;base64,{{ p12_b64 }}" download="{{ filename }}">Download the certificate (.p12)</a></p>
+  {% if tls_profiles %}
+  <p>Or download a setup file that holds this certificate and also sets up the Wi-Fi. The device asks for the passphrase.</p>
+  <ul class="setup-files">
+    {% for f in tls_profiles %}<li><a class="download" href="data:{{ f.mimetype }};base64,{{ f.b64 }}" download="{{ f.filename }}">{{ f.title }}</a></li>{% endfor %}
+  </ul>
+  {% endif %}
   <ol class="steps">
     <li>Open the file on the device it is for. Type the passphrase exactly as shown, with the dashes.</li>
     <li>Set up the Wi-Fi as EAP-TLS: identity <strong>{{ session.uid }}</strong>, this certificate, and the lab CA{% if has_endpoint('downloads.setup') %} (from <a href="{{ url_for('downloads.setup') }}">Set up Wi-Fi</a>){% endif %} to check the server name radius.nitsrinagar.lab.</li>

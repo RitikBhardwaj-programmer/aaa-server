@@ -60,7 +60,7 @@ class ActivityCase(CoreCase):
         pki.certs_for_mac.side_effect = list_error
         pki.certs_for_mac.return_value = list(serials)
 
-        def revoke(uid, serial, reason):
+        def revoke(uid, serial, reason, disconnect=True):
             if revoke_error and serial in revoke_error:
                 raise revoke_error[serial]
             return {"serial": serial, "revoked_at": "2026-10-27T10:00:00+05:30", "disconnect": []}
@@ -179,7 +179,8 @@ class ApiActivityTests(ActivityCase):
         self.assertEqual(body["disconnect"], [{"nas": "10.89.0.1", "result": "ACK"}])
         pki.certs_for_mac.assert_called_once_with(UID, MAC)
         self.assertEqual(pki.revoke_core.call_args_list,
-                         [mock.call(UID, "4f1c0e", "not_me"), mock.call(UID, "a0b1c2", "not_me")])
+                         [mock.call(UID, "4f1c0e", "not_me", disconnect=False),
+                          mock.call(UID, "a0b1c2", "not_me", disconnect=False)])
         self.mocks["send_disconnect"].assert_called_once()
 
     def test_review_not_me_without_certificates(self):
@@ -228,7 +229,15 @@ class ApiActivityTests(ActivityCase):
         self.addCleanup(portal.DISCONNECTS_RUNNING.discard, UID)
         resp = self.review(MAC, {"verdict": "not_me"})
         self.assertEqual(resp.status_code, 409)
-        pki.revoke_core.assert_called_once_with(UID, "4f1c0e", "not_me")
+        pki.revoke_core.assert_called_once_with(UID, "4f1c0e", "not_me", disconnect=False)
+
+    def test_a_disconnect_error_after_the_revocation_counts_as_revoked(self):
+        # revoke_core raises Conflict / RateLimited only from its disconnect, after the revocation
+        self.use_pki(["4f1c0e", "a0b1c2"], revoke_error={"4f1c0e": portal.Conflict("busy"),
+                                                         "a0b1c2": portal.RateLimited("slow down")})
+        self.db_results = [[{"verdict": "not_me"}], []]
+        body = self.review(MAC, {"verdict": "not_me"}).get_json()
+        self.assertEqual((body["revoked"], body["revoke_failed"]), (["4f1c0e", "a0b1c2"], []))
 
     def test_review_not_me_of_an_offline_device(self):
         self.db_results = [[{"verdict": "not_me"}], []]
@@ -358,7 +367,7 @@ class WebActivityTests(ActivityCase):
         self.assertIn("Change it now", text)
 
     def test_not_me_says_when_a_certificate_was_not_revoked(self):
-        self.use_pki(["4f1c0e"], revoke_error={"4f1c0e": portal.Conflict("busy")})
+        self.use_pki(["4f1c0e"], revoke_error={"4f1c0e": portal.Unavailable("db down")})
         self.db_results = [[{"verdict": "not_me"}], []]
         where, text = self.post_review(MAC, "not_me")
         self.assertTrue(where.endswith("/password"))

@@ -679,6 +679,32 @@ class WebTests(PkiCase):
         self.assertNotIn(passphrase, again)
         self.assertNotIn("data:application/x-pkcs12", again)
 
+    def test_setup_files_hold_the_certificate_but_not_the_passphrase(self):
+        import downloads
+        with mock.patch.object(downloads, "CA_FILE", os.path.join(self.dir, "ca.pem")), \
+                mock.patch.object(downloads, "SIGN_PROFILES", False):
+            html = self.new_cert().get_data(as_text=True)
+        passphrase = re.search(r'class="passphrase"><code>([^<]+)</code>', html).group(1)
+        links = re.findall(r'href="data:([^;"]+);base64,([^"]+)" download="([^"]+)"', html)
+        names = [name for _, _, name in links]
+        self.assertEqual(names, ["nits-wifi-student042.p12", "nits-wifi-tls.mobileconfig",
+                                 "nits-wifi-tls-setup.ps1", "nits-wifi-tls-setup.sh"])
+        for mimetype, b64, name in links[1:]:
+            body = base64.b64decode(b64)
+            with self.subTest(name=name):
+                self.assertNotIn(passphrase.encode(), body)
+                self.assertNotIn(passphrase.replace("-", "").encode(), body)
+        self.assertNotIn("<script", html)
+
+    def test_a_setup_file_that_cannot_be_made_is_left_out(self):
+        import downloads
+        with mock.patch.object(downloads, "CA_FILE", "/nonexistent/ca.pem"):
+            resp = self.new_cert()
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+        self.assertIn("data:application/x-pkcs12", html)        # the certificate is still shown
+        self.assertNotIn("nits-wifi-tls", html)
+
     def test_each_download_has_its_own_passphrase(self):
         first = re.search(r'class="passphrase"><code>([^<]+)<', self.new_cert().get_data(as_text=True)).group(1)
         second = re.search(r'class="passphrase"><code>([^<]+)<', self.new_cert().get_data(as_text=True)).group(1)

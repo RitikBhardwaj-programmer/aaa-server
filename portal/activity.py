@@ -81,7 +81,12 @@ def revoke_device_certs(uid, mac):
     revoked, failed = [], []
     for serial in serials:
         try:
-            pki.revoke_core(uid, serial, "not_me")
+            # No disconnect here: review_core disconnects the device once, after this
+            pki.revoke_core(uid, serial, "not_me", disconnect=False)
+        except (core.Conflict, core.RateLimited):
+            # Only the disconnect raises these, after the revocation (docs/api/v1.md section 6)
+            core.log.info("not_me: certificate revoked: uid=%s mac=%s serial=%s", uid, mac, serial)
+            revoked.append(serial)
         except Exception:
             core.log.exception("not_me: cannot revoke certificate %s of uid=%s", serial, uid)
             failed.append(serial)

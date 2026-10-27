@@ -23,6 +23,7 @@ import hashlib
 import os
 import re
 import secrets
+import sys
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
@@ -384,7 +385,31 @@ def new():
     except core.PortalError:
         certs = None                    # the file must still be shown: it cannot be made again
     return page(certs, issued=issued["row"], passphrase=passphrase,
-                p12_b64=base64.b64encode(blob).decode("ascii"), filename=f"nits-wifi-{uid}.p12")
+                p12_b64=base64.b64encode(blob).decode("ascii"), filename=f"nits-wifi-{uid}.p12",
+                tls_profiles=tls_profiles(uid, blob))
+
+
+TLS_PROFILE_NAMES = (("apple", "iPhone, iPad or Mac"), ("windows", "Windows"), ("linux", "Linux"))
+
+
+def tls_profiles(uid, blob):
+    """The EAP-TLS setup files of downloads.py (stage S6) for this PKCS#12 file, as data: links:
+    [{"title", "filename", "mimetype", "b64"}]. They hold the file but never the passphrase. Empty
+    without downloads.py; a profile that cannot be made is left out, never an error on this page."""
+    if "downloads" not in core.app.blueprints:
+        return []
+    downloads = sys.modules["downloads"]
+    files = []
+    for kind, title in TLS_PROFILE_NAMES:
+        try:
+            body, filename, mimetype = downloads.tls_profile(uid, kind, blob)
+        except Exception:
+            core.log.exception("no EAP-TLS %s profile for uid=%s", kind, uid)
+            continue
+        data = body.encode("utf-8") if isinstance(body, str) else body
+        files.append({"title": title, "filename": filename, "mimetype": mimetype.split(";")[0],
+                      "b64": base64.b64encode(data).decode("ascii")})
+    return files
 
 
 @bp.route("/certs/revoke", methods=["POST"])
