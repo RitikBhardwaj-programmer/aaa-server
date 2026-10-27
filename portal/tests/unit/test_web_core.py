@@ -74,10 +74,11 @@ class WebDeviceTests(CoreCase):
         self.assertIn("2 of 3 devices online", html)
         self.assertLess(html.index(other), html.index(MAC))      # slots in joining order
         self.assertIn("Devices seen", html)
+        # A nav link is shown only when its feature module is installed (app.register_features)
         for endpoint, label in (("activity.page", "Sign-in activity"), ("downloads.setup", "Set up Wi-Fi"),
                                 ("pki.certs", "Device certificates")):
-            if endpoint not in portal.app.view_functions:
-                self.assertNotIn(label, html)                  # its module does not exist yet
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(label in html, endpoint in portal.app.view_functions)
         self.assertNotIn("<script", html)
         self.assertNotIn("<style", html)
 
