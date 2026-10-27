@@ -165,6 +165,9 @@ From the S2 security review (PR #5, 2026-10-27; no Blocker or High; L1 fixed in 
 - **L4** An alert can never be dismissed when its `user_devices.callingstationid` fails `MAC_RE`. Fix: validate MACs when the row is written (trigger), or review by a server-side key.
 - **L5** The banner opens a second unpooled database connection on every `/devices` render and, with alerts, runs `live_sessions` twice. Fix: reuse the page's connection and live sessions, or add a pool.
 
+From the S3 merge review (PR #4, 2026-10-27):
+- **Nit** `/setup/windows.ps1` is served as `text/plain; charset=utf-8; charset=utf-8`: Flask adds a charset to a `text/*` mimetype that already has one. Fix: give `text/plain` in `downloads.FILES` and let Flask add the charset.
+
 ## Routing card
 | Phase | Agent | Model | Effort | Why |
 |---|---|---|---|---|
