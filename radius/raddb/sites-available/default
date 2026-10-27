@@ -99,6 +99,25 @@ post-auth {
 		&Acct-Interim-Interval := &session-state:Acct-Interim-Interval
 	}
 
+	# EAP-TLS: the policy and the certificate check ran in sites-available/check-eap-tls, which put
+	# the stored uid in reply:User-Name and the serial in reply:Tmp-String-7. Remember which device
+	# used which certificate (table device_cert_seen: the portal's pki.certs_for_mac, and the
+	# Disconnect after a revoke). The SELECT inserts nothing for an unknown serial, so the INSERT
+	# cannot fail on the foreign key; with PostgreSQL down it writes nothing and the login goes on.
+	if (&reply:Tmp-String-7) {
+		if (&Calling-Station-Id) {
+			update control {
+				&Tmp-String-8 := "%{sql:INSERT INTO device_cert_seen (serial, username, callingstationid) \
+					SELECT serial, username, '%{Calling-Station-Id}' FROM device_certs \
+					WHERE serial = '%{reply:Tmp-String-7}' AND username = '%{reply:User-Name}' \
+					ON CONFLICT (serial, callingstationid) DO UPDATE SET last_seen = now()}"
+			}
+		}
+		update reply {
+			&Tmp-String-7 !* ANY
+		}
+	}
+
 	# Log the accept in PostgreSQL table radpostauth. If the database is down, log nothing
 	# but still accept (fail = 1 stops a database error from turning into a reject).
 	sql {

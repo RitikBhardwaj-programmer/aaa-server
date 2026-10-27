@@ -8,14 +8,26 @@
 #   server.key       - server private key
 #   profile-sign.pem - profile-signing certificate (signed by the CA, S/MIME signing only)
 #   profile-sign.key - profile-signing private key (a separate key, not the server key)
+#   device-ca.pem    - Device CA (intermediate, signed by the CA): signs the EAP-TLS device
+#                      certificates of the portal (/certs, POST /api/v1/certs)
+#   device-ca.key    - Device CA private key (mounted read-only into the portal)
 # Each part is made only if its certificate does not exist yet, so you can run the script again
 # after an update: it adds the new files and never overwrites the old ones.
+# ca.key is used only by this script. Keep it offline in a real deployment.
+#
+# Usage:  sh certs/make-certs.sh
+# Windows Git Bash:  MSYS_NO_PATHCONV=1 sh certs/make-certs.sh
+#   (without it, Git Bash turns -subj "/C=IN/..." into a Windows path and openssl fails).
+#   scripts/init.ps1 runs it in the FreeRADIUS image instead, which needs no such setting.
 set -eu
 cd "$(dirname "$0")"
 
 CA_CN="NIT Srinagar Lab CA"
 SERVER_CN="radius.nitsrinagar.lab"
 SIGN_CN="NIT Srinagar Wi-Fi Profile Signing"
+# FreeRADIUS accepts client certificates from this exact issuer only (check_cert_issuer in
+# radius/raddb/mods-available/eap): change both together
+DEVICE_CA_CN="NIT Srinagar Device CA"
 
 umask 077
 
@@ -73,4 +85,37 @@ EOF
     # so the key must be readable by other users of this PC. It can only sign Wi-Fi profiles.
     chmod 644 profile-sign.pem profile-sign.key
     openssl x509 -in profile-sign.pem -noout -subject -issuer -enddate
+fi
+
+if [ -f device-ca.pem ]; then
+    echo "device-ca.pem already exists - not overwriting." >&2
+elif [ -f device-ca.key ]; then
+    echo "device-ca.key exists without device-ca.pem - not overwriting it. Move it away, then run again." >&2
+    exit 1
+elif [ ! -f ca.key ]; then
+    echo "ca.key is missing: cannot make device-ca.pem. Put ca.key back in this folder, then run again." >&2
+    exit 1
+else
+    # An intermediate CA for end-entity certificates only (pathlen 0). The portal holds this key,
+    # never ca.key: a stolen portal could issue device certificates (FreeRADIUS still refuses every
+    # serial that is not in the database, sites-available/check-eap-tls), but no CA certificate,
+    # and FreeRADIUS accepts client certificates from this issuer only.
+    cat > device-ca.ext <<EOF
+basicConstraints=critical,CA:TRUE,pathlen:0
+keyUsage=critical,keyCertSign,cRLSign
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always
+EOF
+
+    openssl req -new -nodes -newkey rsa:3072 -sha256 \
+        -keyout device-ca.key -out device-ca.csr \
+        -subj "/C=IN/O=NIT Srinagar/OU=Network Lab/CN=${DEVICE_CA_CN}"
+    openssl x509 -req -in device-ca.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
+        -days 1825 -sha256 -extfile device-ca.ext -out device-ca.pem
+    rm -f device-ca.csr device-ca.ext ca.srl
+
+    # Like profile-sign.key: the portal (uid 10001) reads it through a read-only bind mount, so it
+    # must be readable by other users of this PC (plan risk: move it to a signing service later)
+    chmod 644 device-ca.pem device-ca.key
+    openssl x509 -in device-ca.pem -noout -subject -issuer -enddate
 fi

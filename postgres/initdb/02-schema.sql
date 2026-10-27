@@ -192,3 +192,6 @@ RESET ROLE;
 -- Both need the role "portal"; each file makes its objects as role radius (SET ROLE in the file).
 \i /migrations/004-portal-signins.sql
 \i /migrations/005-device-reviews.sql
+-- EAP-TLS device certificates (portal/pki.py) and the devices that used them (FreeRADIUS
+-- check-eap-tls). Needs the role "portal"; makes its objects as role radius (SET ROLE in the file).
+\i /migrations/006-device-certs.sql

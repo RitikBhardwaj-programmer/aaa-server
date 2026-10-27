@@ -265,6 +265,74 @@ check "reaped session, time after its last update -> no rows" "$(who "$ip_reap" 
 acct faculty001 Stop "wi-$run-b" "$mac_b" "Framed-IP-Address = $ip, Acct-Session-Time = 1800" > /dev/null
 wait_for "SELECT COUNT(*) FROM radacct WHERE acctsessionid = 'wi-$run-b' AND acctstoptime IS NULL;" 0 > /dev/null
 
+echo "== 11. EAP-TLS with device certificates (Device CA, sites-available/check-eap-tls)"
+# tls_cert <CN> <name>: a key and a certificate of the Device CA, made the way portal/pki.py makes
+# them (CN = uid, clientAuth, 20-byte random serial); prints the serial as FreeRADIUS writes it.
+# The row in device_certs is what the portal would INSERT; written here as role radius.
+tls_cert() {
+    local serial
+    serial=4$(openssl rand -hex 20 | cut -c2-)      # first byte 0x40-0x4f: positive, always 20 bytes
+    openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=$1" \
+        -keyout "$work/$2.key" -out "$work/$2.csr" 2> /dev/null
+    printf 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth\n' > "$work/tls.ext"
+    openssl x509 -req -in "$work/$2.csr" -CA /certs/device-ca.pem -CAkey /certs/device-ca.key -set_serial "0x$serial" \
+        -days 365 -sha256 -extfile "$work/tls.ext" -out "$work/$2.pem" 2> /dev/null
+    echo "$serial"
+}
+# add_cert <serial> <uid> [days the row ended ago]: an active row, or one that expired that many days ago
+add_cert() {
+    local end="now() + interval '1 year'" start="now()"
+    [ -n "${3:-}" ] && end="now() - interval '$3 days'" && start="now() - interval '2 years'"
+    q "INSERT INTO device_certs (serial, username, label, pubkey_sha256, issued_at, not_after, via) VALUES ('$1', '$2', 'e2e-$run', repeat('0', 64), $start, $end, 'app');" > /dev/null
+}
+# tls_login <identity> <name> [device MAC]
+tls_login() {
+    cat > "$work/tls.conf" <<EOF
+network={
+  key_mgmt=WPA-EAP
+  eap=TLS
+  identity="$1"
+  ca_cert="/certs/ca.pem"
+  domain_match="$SERVER_NAME"
+  client_cert="$work/$2.pem"
+  private_key="$work/$2.key"
+}
+EOF
+    eapol_test -c "$work/tls.conf" -a "$RADIUS" -s "$SECRET" -M "${3:-02:00:00:00:0C:01}" -t 10 > "$work/out" 2>&1
+    tail -1 "$work/out"
+}
+tls_mac="02:00:${run:0:2}:${run:2:2}:0C:01"
+s_ok=$(tls_cert student001 ok); add_cert "$s_ok" student001
+[ "${SEND_VLAN:-yes}" = no ] && vlan="" || vlan=10
+got="$(tls_login student001 ok "$tls_mac") $(hex2str "$(attr 81 "$work/out")") $(hex2str "$(attr 25 "$work/out")") $(attr 1 "$work/out")"
+check "EAP-TLS student001, valid certificate -> Accept, VLAN ${vlan:-none}, Class students" "$got" "SUCCESS $vlan students student001"
+check "the device and the serial are recorded (device_cert_seen)" \
+      "$(q "SELECT username || ' ' || callingstationid FROM device_cert_seen WHERE serial = '$s_ok';")" "student001 $(echo "$tls_mac" | tr : - | tr a-f A-F)"
+check "the Accept is logged with the uid (radpostauth)" \
+      "$(q "SELECT reply FROM radpostauth WHERE username = 'student001' AND callingstationid = '$(echo "$tls_mac" | tr : - | tr a-f A-F)' ORDER BY authdate DESC LIMIT 1;")" "Access-Accept"
+check "EAP-TLS with another user's identity (CN student001, identity faculty001) -> Reject" "$(tls_login faculty001 ok)" FAILURE
+q "UPDATE device_certs SET revoked_at = now(), revoke_reason = 'user' WHERE serial = '$s_ok';" > /dev/null
+check "EAP-TLS after the certificate is revoked -> Reject" "$(tls_login student001 ok "$tls_mac")" FAILURE
+tls_cert student001 unknown > /dev/null
+check "EAP-TLS with a Device CA certificate that is not in device_certs -> Reject" "$(tls_login student001 unknown)" FAILURE
+s_other=$(tls_cert faculty001 other); add_cert "$s_other" student001
+check "EAP-TLS whose serial belongs to another user (CN faculty001, row of student001) -> Reject" "$(tls_login faculty001 other)" FAILURE
+s_exp=$(tls_cert guest001 expired); add_cert "$s_exp" guest001 1
+check "EAP-TLS with an expired device_certs row -> Reject" "$(tls_login guest001 expired)" FAILURE
+s_dis=$(tls_cert disabled001 disabled); add_cert "$s_dis" disabled001
+check "EAP-TLS disabled001 with an active certificate -> Reject (LDAP group)" "$(tls_login disabled001 disabled)" FAILURE
+s_fac=$(tls_cert faculty001 faculty); add_cert "$s_fac" faculty001
+[ "${SEND_VLAN:-yes}" = no ] && vlan="" || vlan=20
+got="$(tls_login faculty001 faculty) $(hex2str "$(attr 81 "$work/out")") $(hex2str "$(attr 25 "$work/out")")"
+check "EAP-TLS faculty001 -> Accept, VLAN ${vlan:-none}, Class faculty" "$got" "SUCCESS $vlan faculty"
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=student001" -days 1 \
+    -keyout "$work/self.key" -out "$work/self.pem" 2> /dev/null
+check "EAP-TLS with a self-signed certificate -> Reject" "$(tls_login student001 self)" FAILURE
+# The revocation is final: even role radius cannot take it back (trigger of migration 006)
+check "a revoked certificate cannot be brought back" \
+      "$(q "UPDATE device_certs SET revoked_at = NULL, revoke_reason = NULL WHERE serial = '$s_ok';" 2>&1 | grep -c 'cannot be changed')" 1
+q "DELETE FROM device_certs WHERE label = 'e2e-$run';" > /dev/null
+
 rm -rf "$work"
 echo
 echo "Result: $pass passed, $fail failed"

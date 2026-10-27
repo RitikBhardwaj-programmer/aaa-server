@@ -158,16 +158,22 @@ services:
       PROFILE_CA_FILE: /certs/ca.pem
       PROFILE_SIGNING_CERT: /certs/profile-sign.pem
       PROFILE_SIGNING_KEY: /certs/profile-sign.key
+      PKI_CA_CERT: /certs/device-ca.pem
+      PKI_CA_KEY: /certs/device-ca.key
       TZ: ${TZ}
     ports:
       - "127.0.0.1:8081:8081"   # localhost only, never exposed to the LAN
-    # Wi-Fi setup profiles (stage S3): the lab root CA, and the profile-signing certificate and key
-    # (certs/make-certs.sh). Only these three files: never ca.key or the RADIUS server key.
-    # Run certs/make-certs.sh before the first start: compose does not create missing files.
+    # Wi-Fi setup profiles (stage S3): the lab root CA, and the profile-signing certificate and key.
+    # Device certificates (stage S5, pki.py): the Device CA certificate and key, which sign EAP-TLS
+    # client certificates only (pathlen 0). Only these five files of certs/ (certs/make-certs.sh):
+    # never ca.key or the RADIUS server key. Run certs/make-certs.sh before the first start, and
+    # again after an update: compose does not create missing files.
     volumes:
       - {type: bind, source: ./certs/ca.pem, target: /certs/ca.pem, read_only: true, bind: {create_host_path: false}}
       - {type: bind, source: ./certs/profile-sign.pem, target: /certs/profile-sign.pem, read_only: true, bind: {create_host_path: false}}
       - {type: bind, source: ./certs/profile-sign.key, target: /certs/profile-sign.key, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./certs/device-ca.pem, target: /certs/device-ca.pem, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./certs/device-ca.key, target: /certs/device-ca.key, read_only: true, bind: {create_host_path: false}}
     # Hardening: read-only file system (only /tmp is writable, in memory: the radclient secret file),
     # no Linux capabilities, no privilege gain through setuid programs
     read_only: true
@@ -223,8 +229,12 @@ services:
       ALLOW_PEAP: ${ALLOW_PEAP}
       SEND_VLAN: ${SEND_VLAN:-yes}
       POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD}
+    # The Device CA key lets the EAP-TLS tests make client certificates the way the portal does
+    # (test profile only; the running portal is the only other service with it)
     volumes:
       - ./certs/ca.pem:/certs/ca.pem:ro
+      - {type: bind, source: ./certs/device-ca.pem, target: /certs/device-ca.pem, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./certs/device-ca.key, target: /certs/device-ca.key, read_only: true, bind: {create_host_path: false}}
       - radius-acct:/radius-acct:ro
     networks:
       aaa:

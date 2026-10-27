@@ -10,6 +10,7 @@ COPY raddb/mods-config/sql/main/postgresql/queries.conf /etc/freeradius/mods-con
 COPY raddb/sites-available/default       /etc/freeradius/sites-available/default
 COPY raddb/sites-available/inner-tunnel  /etc/freeradius/sites-available/inner-tunnel
 COPY raddb/sites-available/buffered-sql  /etc/freeradius/sites-available/buffered-sql
+COPY raddb/sites-available/check-eap-tls /etc/freeradius/sites-available/check-eap-tls
 COPY raddb/policy.d/campus               /etc/freeradius/policy.d/campus
 COPY radius-start.sh                     /usr/local/bin/radius-start.sh
 
@@ -17,6 +18,7 @@ RUN ln -sf ../mods-available/ldap      /etc/freeradius/mods-enabled/ldap \
  && ln -sf ../mods-available/sql       /etc/freeradius/mods-enabled/sql \
  && ln -sf ../mods-available/sql_spool /etc/freeradius/mods-enabled/sql_spool \
  && ln -sf ../sites-available/buffered-sql /etc/freeradius/sites-enabled/buffered-sql \
+ && ln -sf ../sites-available/check-eap-tls /etc/freeradius/sites-enabled/check-eap-tls \
  # Log every accept/reject (with the reason, never the password) to the server log
  && sed -i 's/^\(\s*auth\) = no/\1 = yes/' /etc/freeradius/radiusd.conf \
  && chmod 755 /usr/local/bin/radius-start.sh
