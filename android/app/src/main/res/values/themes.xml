@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.NitsWifi" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/ink</item>
+        <item name="colorOnPrimary">@color/snow</item>
+        <item name="colorPrimaryContainer">@color/snow</item>
+        <item name="colorOnPrimaryContainer">@color/ink</item>
+        <item name="colorSecondary">@color/kesar</item>
+        <item name="colorOnSecondary">@color/ink</item>
+        <item name="colorSecondaryContainer">@color/alert_bg</item>
+        <item name="colorOnSecondaryContainer">@color/ink</item>
+        <item name="colorTertiary">@color/willow</item>
+        <item name="colorOnTertiary">@color/paper</item>
+        <item name="colorError">@color/chinar</item>
+        <item name="colorOnError">@color/paper</item>
+        <item name="android:colorBackground">@color/snow</item>
+        <item name="colorOnBackground">@color/ink</item>
+        <item name="colorSurface">@color/paper</item>
+        <item name="colorOnSurface">@color/ink</item>
+        <item name="colorOnSurfaceVariant">@color/slate</item>
+        <item name="colorOutline">@color/rule</item>
+        <!-- The ink header band sits under the status bar: light status bar icons. -->
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <style name="Text.Display" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="android:fontFamily">sans-serif-condensed</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/ink</item>
+    </style>
+
+    <style name="Text.Label" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:textColor">@color/slate</item>
+    </style>
+
+    <style name="Card" parent="Widget.Material3.CardView.Outlined">
+        <item name="cardBackgroundColor">@color/paper</item>
+        <item name="strokeColor">@color/rule</item>
+        <item name="contentPadding">16dp</item>
+    </style>
+</resources>

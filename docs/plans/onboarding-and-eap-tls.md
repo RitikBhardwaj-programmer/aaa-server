@@ -134,7 +134,7 @@ Each real-device test gets an experiment note (`lab-experiment-log`).
 
 ## New dependencies (approving the plan approves these)
 - **Python:** `cryptography`, pinned with `cffi` and `pycparser`. Needed for CMS signing (S3) and the CA and PKCS#12 (S5).
-- **Android:** AGP, Kotlin, `androidx.core-ktx`, `androidx.appcompat`, `material`, `kotlinx-coroutines-android`, `junit`. Bouncy Castle (CSR) only in S6.
+- **Android:** AGP, Kotlin, `androidx.core-ktx`, `androidx.appcompat`, `material`, `kotlinx-coroutines-android`, `junit`. Bouncy Castle (CSR) only in S6. `org.json:json` for JVM unit tests only (approved 2026-10-27 in the PR #6 review; not in the APK).
 - **GitHub Actions workflows** for the portal and the Android app.
 - **Not now:** `segno` (QR code, backlog), `signxml`/`lxml`, and `gunicorn` (needed before the portal goes on the LAN).
 
@@ -167,6 +167,10 @@ From the S2 security review (PR #5, 2026-10-27; no Blocker or High; L1 fixed in 
 
 From the S3 merge review (PR #4, 2026-10-27):
 - **Nit** `/setup/windows.ps1` is served as `text/plain; charset=utf-8; charset=utf-8`: Flask adds a charset to a `text/*` mimetype that already has one. Fix: give `text/plain` in `downloads.FILES` and let Flask add the charset.
+
+From the S4 merge review (PR #6, 2026-10-27):
+- **Low** `.github/workflows/*.yml` pin actions by major tag (`actions/checkout@v4`, `gradle/actions/setup-gradle@v4`, ...). A moved tag runs new code in CI. Fix: pin each action to a full commit SHA, with the tag in a comment.
+- **Low** `POST /api/v1/devices/disconnect` with a MAC that does not look like a MAC (`{"mac": "zz"}`) gives `404 not_found`, but §3 of `docs/api/v1.md` says `400 invalid_input` for the MAC format. `MAC_RE` allows any `[0-9A-Za-z:.-]`. Fix: check the 6-octet form in `disconnect_core`, or change the contract text.
 
 ## Routing card
 | Phase | Agent | Model | Effort | Why |

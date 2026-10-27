@@ -1,0 +1,8 @@
+<!-- The portal mark: three device slots, two filled. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#EEF3F1" android:pathData="M29,40h10a2,2 0 0 1 2,2v24a2,2 0 0 1 -2,2h-10a2,2 0 0 1 -2,-2v-24a2,2 0 0 1 2,-2z" />
+    <path android:fillColor="#EEF3F1" android:pathData="M49,40h10a2,2 0 0 1 2,2v24a2,2 0 0 1 -2,2h-10a2,2 0 0 1 -2,-2v-24a2,2 0 0 1 2,-2z" />
+    <path android:strokeColor="#D9981C" android:strokeWidth="3" android:fillColor="#00000000"
+        android:pathData="M69.5,41.5h9a1.5,1.5 0 0 1 1.5,1.5v22a1.5,1.5 0 0 1 -1.5,1.5h-9a1.5,1.5 0 0 1 -1.5,-1.5v-22a1.5,1.5 0 0 1 1.5,-1.5z" />
+</vector>
