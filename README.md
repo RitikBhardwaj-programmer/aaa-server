@@ -217,6 +217,14 @@ docker compose exec -T postgres psql -U postgres -d radius -v ON_ERROR_STOP=1 -f
 docker compose exec -T postgres psql -U postgres -d radius -v ON_ERROR_STOP=1 -f /migrations/005-device-reviews.sql
 ```
 
+Device certificates for EAP-TLS (`/certs`, `POST /api/v1/certs`) need the Device CA and migration 006. On an existing lab, run `.\scripts\init.ps1` again (it adds `certs/device-ca.pem` and `device-ca.key` and keeps every existing file), apply the migration (safe to run again), then rebuild:
+
+```powershell
+.\scripts\init.ps1
+docker compose exec -T postgres psql -U postgres -d radius -v ON_ERROR_STOP=1 -f /migrations/006-device-certs.sql
+docker compose up -d --build
+```
+
 The LDAP account is added when the `ldap` container starts (`docker compose up -d --build ldap`), also on an existing directory.
 
 **Lab limits** (not for use by others on the LAN yet):
@@ -330,15 +338,16 @@ docker compose up -d --build
 | `ldap/set-disabled.sh` | Adds a user to, or removes a user from, `cn=disabled` |
 | `tests/disconnect-user.sh` | Sends Disconnect-Requests for a user's open sessions (run through the `tools` service) |
 | `ldap/seed/users.txt` | Test users |
-| `radius/raddb/` | Only the FreeRADIUS files that differ from stock: `clients.conf`, `mods-available/{ldap,eap,sql,sql_spool}`, `mods-config/sql/main/postgresql/queries.conf`, `sites-available/{default,inner-tunnel,buffered-sql}`, `policy.d/campus` |
+| `radius/raddb/` | Only the FreeRADIUS files that differ from stock: `clients.conf`, `mods-available/{ldap,eap,sql,sql_spool}`, `mods-config/sql/main/postgresql/queries.conf`, `sites-available/{default,inner-tunnel,buffered-sql,check-eap-tls}`, `policy.d/campus` |
 | `postgres/initdb/` | First-start database setup: role `radius`, partitioned schema, device-limit tables, maintenance functions |
 | `postgres/maintenance.sh` | Stale-session reaper, partition creation and retention, device expiry |
-| `certs/make-certs.sh` | Lab CA and server certificate |
+| `certs/make-certs.sh` | Lab CA, server certificate, profile-signing certificate and Device CA (adds missing files only) |
 | `tests/run-tests.sh` | End-to-end tests |
 | `portal/` | Self-service portal: `app.py`, `templates/`, `static/portal.css`, `blocklist.txt`, `requirements.txt` (pinned), `tests/test_portal.py` |
 | `postgres/migrations/003-who-had-ip.sql` | Index and the `who_had_ip` function (used by `scripts/who-had-ip.ps1`) |
 | `postgres/migrations/002-portal-*` | Read-only database role `portal` (SQL) and its password setter (script) |
 | `postgres/migrations/004-portal-signins.sql`, `005-device-reviews.sql` | Function `portal_signins` (the portal's only way into `radpostauth`) and table `device_reviews` (answers to new-device alerts) |
+| `postgres/migrations/006-device-certs.sql` | Tables `device_certs` (EAP-TLS certificates; the revocation list FreeRADIUS checks) and `device_cert_seen` (which device used which certificate) |
 | `tests/portal-test-user.sh` | Creates and deletes the temporary user for the portal tests |
 | `tests/ldap-checks.sh` | Password-store checks run inside the ldap container (Argon2, NT hash, self-service password change) |
 | `docs/decisions/` | Design decisions, e.g. `0002-ldap-only.md` |

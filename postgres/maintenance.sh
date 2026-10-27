@@ -3,7 +3,8 @@
 #   - close stale sessions (no accounting packet for STALE_SESSION_MINUTES), so a lost Stop
 #     never blocks a student at the device limit
 #   - create next months' partitions, drop partitions older than ACCT_RETENTION_MONTHS
-#   - forget devices not seen for DEVICE_EXPIRY_DAYS
+#   - forget devices not seen for DEVICE_EXPIRY_DAYS (also which device used which EAP-TLS certificate)
+#   - delete device certificates that ended (expired or revoked) more than ACCT_RETENTION_MONTHS ago
 set -u
 export PGHOST=postgres PGUSER=radius PGDATABASE=radius PGPASSWORD="$POSTGRES_RADIUS_PASSWORD"
 
@@ -17,6 +18,9 @@ SELECT 'dropped old partitions: ' || (drop_old_partitions('radacct', $ACCT_RETEN
                                     + drop_old_partitions('radpostauth', $ACCT_RETENTION_MONTHS));
 WITH d AS (DELETE FROM user_devices WHERE last_seen < now() - make_interval(days => $DEVICE_EXPIRY_DAYS) RETURNING 1)
 SELECT 'expired devices: ' || count(*) FROM d;
+WITH s AS (DELETE FROM device_cert_seen WHERE last_seen < now() - make_interval(days => $DEVICE_EXPIRY_DAYS) RETURNING 1),
+     c AS (DELETE FROM device_certs WHERE LEAST(not_after, COALESCE(revoked_at, not_after)) < now() - make_interval(months => $ACCT_RETENTION_MONTHS) RETURNING 1)
+SELECT 'expired certificate records: ' || (SELECT count(*) FROM s) + (SELECT count(*) FROM c);
 -- Same retention for data outside the monthly partitions: the default partitions,
 -- device-limit events (user + MAC) and session claims
 WITH a AS (DELETE FROM radacct_default WHERE acctstarttime < date_trunc('month', now()) - make_interval(months => $ACCT_RETENTION_MONTHS) RETURNING 1),

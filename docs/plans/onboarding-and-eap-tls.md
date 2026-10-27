@@ -136,6 +136,7 @@ Each real-device test gets an experiment note (`lab-experiment-log`).
 - **Python:** `cryptography`, pinned with `cffi` and `pycparser`. Needed for CMS signing (S3) and the CA and PKCS#12 (S5).
 - **Android:** AGP, Kotlin, `androidx.core-ktx`, `androidx.appcompat`, `material`, `kotlinx-coroutines-android`, `junit`. Bouncy Castle (CSR) only in S6. `org.json:json` for JVM unit tests only (approved 2026-10-27 in the PR #6 review; not in the APK).
 - **GitHub Actions workflows** for the portal and the Android app.
+- **Test image only:** Debian `openssl` in `tests/Dockerfile`, to make EAP-TLS client certificates for the e2e tests (approved 2026-10-27 in the PR #7 review; not in the RADIUS or portal images).
 - **Not now:** `segno` (QR code, backlog), `signxml`/`lxml`, and `gunicorn` (needed before the portal goes on the LAN).
 
 ## Risks and open items
@@ -171,6 +172,11 @@ From the S3 merge review (PR #4, 2026-10-27):
 From the S4 merge review (PR #6, 2026-10-27):
 - **Low** `.github/workflows/*.yml` pin actions by major tag (`actions/checkout@v4`, `gradle/actions/setup-gradle@v4`, ...). A moved tag runs new code in CI. Fix: pin each action to a full commit SHA, with the tag in a comment.
 - **Low** `POST /api/v1/devices/disconnect` with a MAC that does not look like a MAC (`{"mac": "zz"}`) gives `404 not_found`, but §3 of `docs/api/v1.md` says `400 invalid_input` for the MAC format. `MAC_RE` allows any `[0-9A-Za-z:.-]`. Fix: check the 6-octet form in `disconnect_core`, or change the contract text.
+
+From the S5/S6 security review (PRs #7 and #8, 2026-10-27; no Blocker; H1, M1, M2, L1, L2 and L5 fixed in the PRs):
+- **M3, accepted risk (user decision)** EAP-TLS runs with TLS 1.2 (`tls-device`, `tls_max_version = "1.2"`), so the client certificate, with CN = uid, goes over the air unencrypted (RFC 5216 §5.1). Anyone near an AP can see which student connects. Fix later: TLS 1.3 for `tls-device` (RFC 9190 encrypts the certificate), tested with `eapol_test` and the S23; or an opaque CN mapped through `device_certs`.
+- **L3** The revocation trigger of migration 006 covers UPDATE only: role `radius` (the owner) can DELETE a revoked row and INSERT the same serial again. Fix: a BEFORE DELETE guard that allows only the maintenance cutoff, or accept that `radius` is trusted.
+- **L4** The issue limit `pki.ISSUES` (10 per hour) is in memory, so with N portal workers it becomes 10×N. The 3-certificate limit still holds in the database. Fix: count issues in `device_certs` when the portal gets several workers (gunicorn).
 
 ## Routing card
 | Phase | Agent | Model | Effort | Why |

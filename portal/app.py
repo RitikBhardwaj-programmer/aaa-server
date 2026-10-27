@@ -575,6 +575,12 @@ def password_core(uid, dn, old, new, confirm):
         raise Unavailable("The login service is temporarily unavailable. Try again later.") from None
     PASSWORD_BY_USER.succeeded(uid, forget_all=True)
     log.info("password changed: uid=%s", uid)
+    # A device certificate must not outlive the password that got it (pki.py, stage S5)
+    if "pki" in app.blueprints:
+        try:
+            sys.modules["pki"].revoke_all_core(uid, "password")
+        except Exception:               # the password is already changed: never turn that into an error
+            log.exception("password changed, but the certificates of uid=%s could not be revoked", uid)
 
 
 # ---- Pages ------------------------------------------------------------------------------------
