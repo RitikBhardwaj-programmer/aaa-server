@@ -19,7 +19,7 @@ class HomeActivity : SessionActivity() {
     private var tab = R.id.nav_devices
 
     // Registered before the activity starts, as the Activity Result API needs
-    private val installer = WifiInstaller(this) { result -> wifi.showResult(result) }
+    private val installer = WifiInstaller(this) { result, serial -> wifi.showResult(result, serial) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +46,7 @@ class HomeActivity : SessionActivity() {
         savedInstanceState?.let {
             tab = it.getInt(STATE_TAB, tab)
             installer.restore(it)
+            wifi.restore(it)
         }
 
         b.nav.setOnItemSelectedListener { item ->
@@ -58,9 +59,11 @@ class HomeActivity : SessionActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        // Only the tab and the network name: never the token or a password
+        // Only the tab, the network name, the setup method and a certificate serial: never the
+        // token, a password or a key
         outState.putInt(STATE_TAB, tab)
         installer.save(outState)
+        wifi.save(outState)
     }
 
     override fun onResume() {

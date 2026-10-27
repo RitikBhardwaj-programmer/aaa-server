@@ -402,4 +402,102 @@ class ApiClientTest {
         assertFalse(tokens.loggedIn)
         assertNull(tokens.user)
     }
+
+    // ---- S6: EAP-TLS profile and device certificates ---------------------------------------------
+
+    @Test
+    fun androidProfileMethods() {
+        loggedIn()
+        val pem = resource("test-ca.pem")
+        http.answer(200, Contract.profile(pem))
+        client.androidProfile(ApiClient.METHOD_TTLS)
+        assertEquals("http://127.0.0.1:8081/api/v1/profiles/android", http.last.url)   // the S3 request, unchanged
+        http.answer(200, Contract.tlsProfile(pem))
+        val p = client.androidProfile(ApiClient.METHOD_TLS)
+        assertEquals("http://127.0.0.1:8081/api/v1/profiles/android?method=tls", http.last.url)
+        assertEquals(AndroidProfile("NITS-Lab", "TLS", null, "student042", null, "radius.nitsrinagar.lab", "DNS:radius.nitsrinagar.lab", pem), p)
+        try {
+            client.androidProfile("peap")
+            fail("peap accepted")
+        } catch (e: IllegalArgumentException) {
+        }
+    }
+
+    @Test
+    fun issueCertSendsCsrAndLabel() {
+        loggedIn()
+        http.answer(201, """{"serial": "4f1c0e", "label": "Pixel 8", "issued_at": "2026-10-27T10:00:00+05:30",
+            "not_after": "2027-10-27T10:00:00+05:30", "cert_pem": "C", "chain_pem": "D"}""")
+        val c = client.issueCert("-----BEGIN CERTIFICATE REQUEST-----\nX\n-----END CERTIFICATE REQUEST-----\n", "Pixel 8")
+        assertEquals("POST", http.last.method)
+        assertEquals("http://127.0.0.1:8081/api/v1/certs", http.last.url)
+        assertEquals("application/json", http.last.headers["Content-Type"])
+        assertEquals("Pixel 8", JSONObject(http.last.body!!).getString("label"))
+        assertEquals(IssuedCert("4f1c0e", "Pixel 8", "2026-10-27T10:00:00+05:30", "2027-10-27T10:00:00+05:30", "C", "D"), c)
+    }
+
+    @Test
+    fun issueCertErrors() {
+        loggedIn()
+        http.answer(409, Contract.error("cert_limit", "You have 3 active certificates."))
+        val limit = expectError { client.issueCert("csr", "Pixel 8") }
+        assertTrue(limit.certLimit)
+        assertFalse(limit.sessionEnded)
+        http.answer(400, Contract.error("bad_csr", "Not a valid CSR."))
+        val bad = expectError { client.issueCert("csr", "Pixel 8") }
+        assertEquals("bad_csr", bad.code)
+        assertFalse(bad.certLimit)
+    }
+
+    @Test
+    fun certList() {
+        loggedIn()
+        http.answer(200, Contract.CERTS)
+        val list = client.certs()
+        assertEquals("http://127.0.0.1:8081/api/v1/certs", http.last.url)
+        assertEquals("GET", http.last.method)
+        assertEquals(3, list.limit)
+        assertEquals(
+            DeviceCert("4f1c0e", "Pixel 8", "2026-10-27T10:00:00+05:30", "2027-10-27T10:00:00+05:30", null, null, "app", true),
+            list.certs[0],
+        )
+        assertEquals("not_me", list.certs[1].revokeReason)
+        assertFalse(list.certs[1].active)
+    }
+
+    @Test
+    fun revokeCertIsADelete() {
+        loggedIn()
+        http.answer(200, Contract.REVOKE)
+        val r = client.revokeCert("4f1c0e")
+        assertEquals("DELETE", http.last.method)
+        assertEquals("http://127.0.0.1:8081/api/v1/certs/4f1c0e", http.last.url)
+        assertNull(http.last.body)
+        assertNull(http.last.headers["Content-Type"])
+        assertEquals(RevokeResult("4f1c0e", "2026-10-27T11:00:00+05:30", listOf(NasResult("10.89.0.1", "ACK"))), r)
+    }
+
+    @Test
+    fun revokeCertChecksTheSerialBeforeACall() {
+        loggedIn()
+        val before = http.requests.size
+        for (bad in listOf("", "4F1C0E", "../me", "4f1c0e?x=1", "a".repeat(65))) {
+            assertEquals("invalid_input", expectError { client.revokeCert(bad) }.code)
+        }
+        assertEquals(before, http.requests.size)
+        http.answer(404, Contract.error("not_found", "No such certificate."))
+        assertEquals("not_found", expectError { client.revokeCert("abcdef") }.code)
+    }
+
+    @Test
+    fun reviewNotMeWithRevokedCertificates() {
+        loggedIn()
+        http.answer(200, Contract.REVIEW_NOT_ME_REVOKED)
+        val r = client.review("DE-AD-BE-EF-00-01", ApiClient.VERDICT_NOT_ME)
+        assertEquals(listOf("4f1c0e", "a0b1c2"), r.revoked)
+        assertEquals(emptyList<String>(), r.revokeFailed)
+        // Older portals (no fields) and "me" (null): both null
+        http.answer(200, Contract.REVIEW_NOT_ME)
+        assertNull(client.review("DE-AD-BE-EF-00-01", ApiClient.VERDICT_NOT_ME).revoked)
+    }
 }

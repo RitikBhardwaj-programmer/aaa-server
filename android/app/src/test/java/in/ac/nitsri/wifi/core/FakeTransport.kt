@@ -2,19 +2,25 @@ package `in`.ac.nitsri.wifi.core
 
 import java.io.IOException
 
-/** Records each request and answers from a queue. A queued null throws IOException (no network). */
+/**
+ * Records each request and answers from a queue. A queued null throws IOException (no network).
+ * [respond] queues an answer that is made from the request (for example a certificate for a CSR).
+ */
 class FakeTransport : HttpTransport {
     val requests = mutableListOf<HttpRequest>()
-    private val answers = ArrayDeque<HttpResponse?>()
+    private val answers = ArrayDeque<((HttpRequest) -> HttpResponse)?>()
 
-    fun answer(status: Int, body: String = "") = apply { answers.addLast(HttpResponse(status, body)) }
+    fun answer(status: Int, body: String = "") = apply { answers.addLast { HttpResponse(status, body) } }
+
+    fun respond(make: (HttpRequest) -> HttpResponse) = apply { answers.addLast(make) }
 
     fun unreachable() = apply { answers.addLast(null) }
 
     override fun execute(request: HttpRequest): HttpResponse {
         requests += request
         check(answers.isNotEmpty()) { "unexpected request $request" }
-        return answers.removeFirst() ?: throw IOException("connection refused")
+        val make = answers.removeFirst() ?: throw IOException("connection refused")
+        return make(request)
     }
 
     val last: HttpRequest get() = requests.last()
@@ -90,6 +96,32 @@ object Contract {
         .put("alt_subject_match", "DNS:radius.nitsrinagar.lab")
         .put("ca_pem", caPem)
         .toString()
+
+    fun tlsProfile(caPem: String) = org.json.JSONObject()
+        .put("ssid", "NITS-Lab")
+        .put("eap", "TLS")
+        .put("phase2", org.json.JSONObject.NULL)
+        .put("identity", "student042")
+        .put("anonymous_identity", org.json.JSONObject.NULL)
+        .put("domain_suffix_match", "radius.nitsrinagar.lab")
+        .put("alt_subject_match", "DNS:radius.nitsrinagar.lab")
+        .put("ca_pem", caPem)
+        .toString()
+
+    const val CERTS = """{
+      "limit": 3,
+      "certs": [
+        {"serial": "4f1c0e", "label": "Pixel 8", "issued_at": "2026-10-27T10:00:00+05:30", "not_after": "2027-10-27T10:00:00+05:30",
+         "revoked_at": null, "revoke_reason": null, "via": "app", "active": true},
+        {"serial": "a0b1c2", "label": "MacBook", "issued_at": "2026-10-01T10:00:00+05:30", "not_after": "2027-10-01T10:00:00+05:30",
+         "revoked_at": "2026-10-20T09:00:00+05:30", "revoke_reason": "not_me", "via": "web", "active": false}
+      ]
+    }"""
+
+    const val REVOKE = """{"serial": "4f1c0e", "revoked_at": "2026-10-27T11:00:00+05:30", "disconnect": [{"nas": "10.89.0.1", "result": "ACK"}]}"""
+
+    const val REVIEW_NOT_ME_REVOKED = """{"mac": "DE-AD-BE-EF-00-01", "verdict": "not_me", "disconnect": [], "next": "password",
+      "revoked": ["4f1c0e", "a0b1c2"], "revoke_failed": []}"""
 
     fun error(code: String, message: String) = """{"error": {"code": "$code", "message": "$message"}}"""
 }

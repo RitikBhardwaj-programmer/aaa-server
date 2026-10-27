@@ -4,6 +4,8 @@ One app for everything on Android (stage S4 of `docs/plans/onboarding-and-eap-tl
 log in, see "N of 3 online" and disconnect a device, review sign-ins and new-device alerts
 ("This was me" / "Not me"), change the password, and set up the `NITS-Lab` network
 (WPA2-Enterprise, EAP-TTLS/PAP, the lab CA, server name `radius.nitsrinagar.lab`).
+From stage S6 the user can pick EAP-TLS with a per-device certificate instead (Password stays
+the default), and see and revoke their device certificates.
 
 The app is a client of the portal JSON API, `docs/api/v1.md`. It has no server code of its own.
 
@@ -12,7 +14,7 @@ The app is a client of the portal JSON API, `docs/api/v1.md`. It has no server c
 | Application ID | `in.ac.nitsri.wifi` |
 | minSdk / targetSdk | 29 (Android 10) / 37 |
 | Toolchain | AGP 9.4.0 (built-in Kotlin), Gradle 9.6.0 (wrapper), JDK 17 |
-| Libraries | androidx.core-ktx, androidx.appcompat, material, kotlinx-coroutines-android; junit and org.json (unit tests only) |
+| Libraries | androidx.core-ktx, androidx.appcompat, material, kotlinx-coroutines-android, Bouncy Castle `bcpkix-jdk18on` (PKCS#10 CSR, S6); junit and org.json (unit tests only) |
 | HTTP | `HttpURLConnection` / `HttpsURLConnection` and `org.json` from the platform |
 | Permissions | `INTERNET`, `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE` |
 
@@ -30,6 +32,8 @@ The app is a client of the portal JSON API, `docs/api/v1.md`. It has no server c
   security config allows plain http to `127.0.0.1` only; everything else is https. Release builds
   allow https only, and the build refuses a non-https address.
 - **No logs.** The app has no `Log` calls. `HttpRequest.toString()` leaves the headers out.
+- **EAP-TLS key in memory only.** See "EAP-TLS setup" below: a software key, never written to a
+  file, preferences, a `Bundle`, a log or a backup.
 - No backup (`allowBackup=false`, data extraction rules exclude everything).
 
 ## Build
@@ -109,6 +113,41 @@ and PAP only, a CA certificate that is valid now, a real host name) and
     applies.
 - After a password change, set up Wi-Fi again: the saved network still has the old password.
 
+## EAP-TLS setup (stage S6)
+
+Set up Wi-Fi > "Device certificate" (`core/Tls.kt`, `docs/api/v1.md` sections 6 and 7):
+
+1. `GET /api/v1/profiles/android?method=tls` gives the same fields with `eap` `TLS`, `phase2`
+   and `anonymous_identity` null. `WifiPlanner.planTls` checks them; a bad answer stops here,
+   before any certificate is made.
+2. `DeviceKeys.generate()` makes an EC P-256 key pair in memory. `Csr.pem()` makes the PKCS#10
+   request (Bouncy Castle, `SHA256withECDSA`, subject CN = uid).
+3. `POST /api/v1/certs {csr_pem, label}`; the label is the phone model (`CertLabels`, 1 to 40
+   characters). `409 cert_limit` shows "You already have 3 active device certificates ... Revoke
+   the certificate of a device that you no longer use" and the list below.
+4. `TlsCertificates.credential` checks the answer: the same public key as ours, not a CA, valid
+   now, clientAuth, signed by the Device CA of `chain_pem`. If it fails, the app revokes the new
+   certificate at once.
+5. `WifiInstaller.installTls`: `Eap.TLS`, `setIdentity(uid)`,
+   `setClientKeyEntryWithCertificateChain(key, [device cert, Device CA])`, `setCaCertificate`,
+   `setDomainSuffixMatch`, `setAltSubjectMatch`; then the same Settings screen or suggestion as
+   for TTLS. If the network is not saved (Cancel, failure), the key is gone, so the app revokes the
+   certificate, and it does not count against the 3.
+
+**Why not an AndroidKeyStore key.** `setClientKeyEntry*` sends the key to the Wi-Fi service as
+PKCS#8 bytes (AOSP `ParcelUtil.writePrivateKey` writes `key.getEncoded()`), and an AndroidKeyStore
+key is not exportable (`getEncoded()` is null), so it cannot go into a `WifiNetworkSuggestion`
+for `ACTION_WIFI_ADD_NETWORKS` or `addNetworkSuggestions`. `setClientKeyPairAlias` (API 31) takes
+only a KeyChain alias that a device or profile owner granted to Wi-Fi
+(`DevicePolicyManager.grantKeyPairToWifiAuth`); this app is not one. So the key is a software key
+from the platform provider, kept only in local variables until Android has saved the network.
+Android then holds it in its Wi-Fi key store and deletes it with the network. The app keeps only
+the serial (also in the saved instance state, to revoke an unused certificate).
+
+The list under "Device certificates" is `GET /api/v1/certs` (active and revoked, newest first);
+Revoke is `DELETE /api/v1/certs/{serial}` after a confirmation. After "Not me" the Activity
+screen also says which certificates of that device the portal revoked.
+
 ## Unit tests (JVM, no device)
 
 `./gradlew testDebugUnitTest` runs `app/src/test`:
@@ -122,6 +161,12 @@ and PAP only, a CA certificate that is valid now, a real host name) and
 - `WifiPlannerTest`: the profile to `WifiEnterpriseConfig` mapping layer: TTLS/PAP only,
   required fields, `DNS:` alt subject match, CA parsing (not a CA, expired, not yet valid), and
   the setup result messages. The test CA in `src/test/resources` is a throwaway, not the lab CA.
+- `TlsTest`: the EC key (software, PKCS#8), the CSR (signature, CN = uid, no RDN injection),
+  `planTls`, the certificate checks (wrong key, CA, expired, no clientAuth, wrong chain), the
+  enrollment flow against the fake server (which signs the CSR with a throwaway CA in
+  `TestPki`), `409 cert_limit`, revoke of an unusable certificate, labels and messages.
+  `ApiClientTest` also covers `?method=tls`, `POST`/`GET /certs`, `DELETE /certs/{serial}` and the
+  `revoked` fields of "Not me".
 - `RulesTest`: base URL policy (https only; debug cleartext to 127.0.0.1 only), the password
   rules with the server's messages (code points, like Python `len`), and the formats.
 
@@ -159,5 +204,11 @@ the app installed, `adb reverse tcp:8081 tcp:8081` done. Write the results in th
    Login. Log in with the new password; set up Wi-Fi again with it; the phone connects.
 10. **Session end.** Change the password on the web portal while the app is open, then Refresh in
     the app → Login with the session message.
-11. **Accessibility.** TalkBack on: every button says what it does ("Disconnect DE-AD-…",
+11. **EAP-TLS (S6).** Set up Wi-Fi > Device certificate → "Get a certificate and set up Wi-Fi" →
+    Save. Settings > Wi-Fi > NITS-Lab: EAP method TLS, user certificate set, CA set, domain
+    `radius.nitsrinagar.lab`, identity `student042`. The phone connects (`radiusd -X`: EAP-TLS
+    Access-Accept, certificate serial as in the list). Cancel on the Settings screen → the message
+    says the certificate was revoked. With 3 active certificates → the cert_limit message.
+    Revoke this phone's certificate → it goes off the Wi-Fi and cannot join again.
+12. **Accessibility.** TalkBack on: every button says what it does ("Disconnect DE-AD-…",
     "DE-AD-… was not me"), headings are read as headings, errors are announced.

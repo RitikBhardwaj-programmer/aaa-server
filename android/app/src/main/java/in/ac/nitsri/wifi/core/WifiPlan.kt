@@ -31,6 +31,27 @@ data class WifiPlan(
     val caCertificate: X509Certificate,
 )
 
+/**
+ * EAP-TLS (docs/api/v1.md section 7): everything except the client key and certificate, which come
+ * from [TlsEnrollment] as a [TlsCredential]. wifi/WifiInstaller.kt applies it:
+ *
+ * | field               | WifiEnterpriseConfig                          |
+ * |---------------------|-----------------------------------------------|
+ * | (always)            | setEapMethod(Eap.TLS)                         |
+ * | identity            | setIdentity (the uid, the CN of the cert)     |
+ * | caCertificate       | setCaCertificate                              |
+ * | domainSuffixMatch   | setDomainSuffixMatch                          |
+ * | altSubjectMatch     | setAltSubjectMatch                            |
+ * | credential          | setClientKeyEntryWithCertificateChain         |
+ */
+data class TlsPlan(
+    val ssid: String,
+    val identity: String,
+    val domainSuffixMatch: String,
+    val altSubjectMatch: String,
+    val caCertificate: X509Certificate,
+)
+
 class WifiPlanException(message: String) : Exception(message)
 
 object WifiPlanner {
@@ -41,11 +62,25 @@ object WifiPlanner {
     fun plan(p: AndroidProfile, now: Date = Date()): WifiPlan {
         if (p.eap != "TTLS") fail("This app sets up EAP-TTLS only, but the portal offered ${p.eap}. Update the app.")
         if (p.phase2 != "PAP") fail("This app sets up EAP-TTLS with PAP only, but the portal offered ${p.phase2}. Update the app.")
+        val anonymous = p.anonymousIdentity
+        if (anonymous.isNullOrBlank()) fail("The portal sent no anonymous identity for the network.")
+        val (domain, alt) = checkCommon(p)
+        return WifiPlan(p.ssid, p.identity, anonymous, domain, alt, caCertificate(p.caPem, now))
+    }
+
+    /** Checks the `GET /profiles/android?method=tls` answer (docs/api/v1.md section 7). */
+    fun planTls(p: AndroidProfile, now: Date = Date()): TlsPlan {
+        if (p.eap != "TLS") fail("The portal offered ${p.eap} instead of EAP-TLS. Update the app.")
+        if (p.phase2 != null) fail("The portal offered EAP-TLS with an inner method. Update the app.")
+        val (domain, alt) = checkCommon(p)
+        return TlsPlan(p.ssid, p.identity, domain, alt, caCertificate(p.caPem, now))
+    }
+
+    /** The SSID, identity and server name checks of both methods. Returns (domain, alt subject match). */
+    private fun checkCommon(p: AndroidProfile): Pair<String, String> {
         val ssidBytes = p.ssid.toByteArray(Charsets.UTF_8).size
         if (p.ssid.isBlank() || ssidBytes > 32) fail("The portal sent a network name that is not valid.")
         if (p.identity.isBlank()) fail("The portal sent no user ID for the network.")
-        val anonymous = p.anonymousIdentity
-        if (anonymous.isNullOrBlank()) fail("The portal sent no anonymous identity for the network.")
         val domain = p.domainSuffixMatch
         if (!HOST.matches(domain)) fail("The portal sent a server name that is not valid.")
         // Older portals might send only the domain; the brief's rule is "DNS:" + domain.
@@ -53,7 +88,7 @@ object WifiPlanner {
         if (!alt.split(';').all { it.startsWith("DNS:") && HOST.matches(it.removePrefix("DNS:")) }) {
             fail("The portal sent a server name check that is not valid.")
         }
-        return WifiPlan(p.ssid, p.identity, anonymous, domain, alt, caCertificate(p.caPem, now))
+        return domain to alt
     }
 
     /** The first certificate of [pem]. It must be a CA certificate that is valid at [now]. */

@@ -11,8 +11,12 @@ class ApiException(val status: Int, val code: String, message: String) : Excepti
 
     val rateLimited: Boolean get() = status == 429
 
+    /** `409 cert_limit`: the user has 3 active device certificates already. */
+    val certLimit: Boolean get() = status == 409 && code == CERT_LIMIT
+
     companion object {
         const val LOGIN_FAILED = "login_failed"
+        const val CERT_LIMIT = "cert_limit"
 
         // Client codes (never sent by the server)
         const val NETWORK = "network"

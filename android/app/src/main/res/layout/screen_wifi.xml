@@ -18,6 +18,43 @@
             android:text="@string/wifi_title" />
 
         <TextView
+            android:id="@+id/methodLabel"
+            style="@style/Text.Label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/wifi_method" />
+
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/method"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            app:checkedButton="@+id/methodTtls"
+            app:selectionRequired="true"
+            app:singleSelection="true">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/methodTtls"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:minHeight="48dp"
+                android:text="@string/wifi_method_ttls" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/methodTls"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:minHeight="48dp"
+                android:text="@string/wifi_method_tls" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+
+        <TextView
+            android:id="@+id/intro"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -89,5 +126,56 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="@string/wifi_mac_note" />
+
+        <!-- EAP-TLS only: the user's device certificates (GET /certs), with Revoke -->
+        <LinearLayout
+            android:id="@+id/certSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                style="@style/Text.Display"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:accessibilityHeading="true"
+                android:text="@string/certs_title" />
+
+            <TextView
+                android:id="@+id/certCount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                style="@style/Text.Label"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/certs_help" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/certRefresh"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/refresh" />
+
+            <TextView
+                android:id="@+id/certStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:accessibilityLiveRegion="polite"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/certList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>

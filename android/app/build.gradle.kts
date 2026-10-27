@@ -17,8 +17,8 @@ android {
         applicationId = "in.ac.nitsri.wifi"
         minSdk = 29
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.4.0"
+        versionCode = 2
+        versionName = "0.6.0"
     }
 
     buildTypes {
@@ -44,6 +44,13 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    packaging {
+        resources {
+            // bcprov, bcutil and bcpkix each have this file (OSGi metadata, not needed on Android)
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
+    }
+
     lint {
         abortOnError = true
         checkDependencies = false
@@ -57,6 +64,8 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("com.google.android.material:material:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // PKCS#10 CSR for the EAP-TLS device certificate (approved for stage S6 only). Pulls bcprov and bcutil.
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.80")
 
     testImplementation("junit:junit:4.13.2")
     // android.jar has only stubs of org.json for JVM unit tests; this is the same API, for tests only.
