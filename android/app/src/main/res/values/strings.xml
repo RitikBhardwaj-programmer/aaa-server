@@ -68,7 +68,22 @@
     <string name="wifi_settings">Network %1$s · user %2$s · server %3$s</string>
     <string name="wifi_android10">Android 10: the phone shows a notification \"Allow suggested Wi-Fi networks?\". Tap Allow.</string>
     <string name="wifi_android11">Android shows a screen \"Save this network?\". Tap Save.</string>
+    <string name="wifi_method">How this phone signs in</string>
+    <string name="wifi_method_ttls">Password</string>
+    <string name="wifi_method_tls">Device certificate</string>
+    <string name="wifi_intro_tls">The app makes a key on this phone and asks the portal for a device certificate (EAP-TLS). The key never leaves the phone, and no password is saved for Wi-Fi. You can have 3 active device certificates; revoke one below to free a place.</string>
+    <string name="wifi_button_tls">Get a certificate and set up Wi-Fi</string>
+    <string name="wifi_settings_tls">Network %1$s · certificate for %2$s · server %3$s</string>
     <string name="wifi_mac_note">The app asks Android to keep one fixed Wi-Fi address for NITS-Lab, so this phone counts as one device. On Samsung phones, check Settings &gt; Wi-Fi &gt; NITS-Lab &gt; MAC address type: keep \"Randomized MAC\" (it stays the same for this network) or choose \"Phone MAC\".</string>
+
+    <!-- Device certificates (EAP-TLS) -->
+    <string name="certs_title">Device certificates</string>
+    <string name="certs_help">Each phone or laptop that signs in with a certificate has its own. Setting up this phone again makes a new certificate: then revoke the old one.</string>
+    <string name="certs_none">You have no device certificates yet.</string>
+    <string name="certs_revoke">Revoke</string>
+    <string name="certs_revoke_desc">Revoke the certificate %1$s</string>
+    <string name="certs_revoke_title">Revoke this certificate?</string>
+    <string name="certs_revoke_text">The device that uses %1$s can no longer sign in with it, and goes off the Wi-Fi now. This cannot be undone.</string>
 
     <!-- Change password -->
     <string name="password_title">Change password</string>

@@ -16,64 +16,97 @@ import `in`.ac.nitsri.wifi.core.AddNetworkOutcome
 import `in`.ac.nitsri.wifi.core.SetupMessages
 import `in`.ac.nitsri.wifi.core.SetupResult
 import `in`.ac.nitsri.wifi.core.SuggestionStatus
+import `in`.ac.nitsri.wifi.core.TlsCredential
+import `in`.ac.nitsri.wifi.core.TlsPlan
 import `in`.ac.nitsri.wifi.core.WifiPlan
 
 /**
- * Saves the NITS-Lab network from a checked [WifiPlan] and the password that the user typed.
+ * Saves the NITS-Lab network from a checked [WifiPlan] and the password that the user typed
+ * (EAP-TTLS), or from a [TlsPlan] and the phone's own key and certificate (EAP-TLS).
  *
  * - Android 11+ (API 30): `Settings.ACTION_WIFI_ADD_NETWORKS`. The user taps Save; the network
  *   becomes a normal saved network (it stays when the app is removed).
  * - Android 10 (API 29): `WifiManager.addNetworkSuggestions`. Android asks with a notification
  *   ("Allow suggested Wi-Fi networks?"). A suggestion goes away when the app is removed.
  *
- * Create it before the activity starts (the Activity Result API needs that).
+ * EAP-TLS: the private key is a software key in memory (see core/Tls.kt). It goes into the
+ * WifiEnterpriseConfig here and Android copies it into its Wi-Fi key store when the network is
+ * saved; this class keeps no reference to it. Only the serial of the certificate is kept (also in
+ * the saved state), so that the caller can revoke a certificate whose network was not saved.
+ *
+ * Create it before the activity starts (the Activity Result API needs that). [onResult] gets the
+ * result and, for EAP-TLS, the certificate serial.
  */
 class WifiInstaller(
     private val activity: ComponentActivity,
-    private val onResult: (SetupResult) -> Unit,
+    private val onResult: (SetupResult, String?) -> Unit,
 ) {
     private var pendingSsid: String? = null
+    private var pendingSerial: String? = null
 
     private val addNetworks = activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         val ssid = pendingSsid ?: DEFAULT_SSID
+        val serial = pendingSerial
         pendingSsid = null
+        pendingSerial = null
         val outcomes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             r.data?.getIntegerArrayListExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)?.map(::outcome)
         } else {
             null
         }
-        onResult(SetupMessages.addNetworks(ssid, r.resultCode == android.app.Activity.RESULT_OK, outcomes))
+        onResult(SetupMessages.addNetworks(ssid, r.resultCode == android.app.Activity.RESULT_OK, outcomes), serial)
     }
 
-    fun save(out: Bundle) = out.putString(STATE_SSID, pendingSsid)
+    fun save(out: Bundle) {
+        out.putString(STATE_SSID, pendingSsid)
+        out.putString(STATE_SERIAL, pendingSerial)          // a serial is not a secret; never the key
+    }
 
     fun restore(state: Bundle) {
         pendingSsid = state.getString(STATE_SSID)
+        pendingSerial = state.getString(STATE_SERIAL)
     }
 
-    /** Builds the configuration and hands it to Android. The caller clears the password field. */
+    /** EAP-TTLS: builds the configuration and hands it to Android. The caller clears the password field. */
     fun install(plan: WifiPlan, password: String) {
         val suggestion = try {
-            suggestion(plan, password)
+            suggestion(plan.ssid, enterpriseConfig(plan, password))
         } catch (e: IllegalArgumentException) {
             // Android refuses an enterprise network without server validation; the plan has it,
             // so this means the platform did not accept a value.
-            onResult(SetupResult(false, "Android refused the network settings. Update the app."))
+            onResult(SetupResult(false, REFUSED), null)
             return
         }
+        hand(plan.ssid, suggestion, null)
+    }
+
+    /** EAP-TLS: the device certificate and key from core/Tls.kt. */
+    fun installTls(plan: TlsPlan, credential: TlsCredential) {
+        val suggestion = try {
+            suggestion(plan.ssid, tlsEnterpriseConfig(plan, credential))
+        } catch (e: IllegalArgumentException) {
+            onResult(SetupResult(false, REFUSED), credential.serial)
+            return
+        }
+        hand(plan.ssid, suggestion, credential.serial)
+    }
+
+    private fun hand(ssid: String, suggestion: WifiNetworkSuggestion, serial: String?) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val intent = Intent(Settings.ACTION_WIFI_ADD_NETWORKS)
                 .putParcelableArrayListExtra(Settings.EXTRA_WIFI_NETWORK_LIST, arrayListOf(suggestion))
             try {
-                pendingSsid = plan.ssid
+                pendingSsid = ssid
+                pendingSerial = serial
                 addNetworks.launch(intent)
                 return
             } catch (e: ActivityNotFoundException) {
                 pendingSsid = null
+                pendingSerial = null
                 // Some builds have no such screen: fall back to a suggestion.
             }
         }
-        onResult(suggest(plan.ssid, suggestion))
+        onResult(suggest(ssid, suggestion), serial)
     }
 
     private fun suggest(ssid: String, suggestion: WifiNetworkSuggestion): SetupResult {
@@ -93,7 +126,9 @@ class WifiInstaller(
 
     companion object {
         private const val STATE_SSID = "wifi_pending_ssid"
+        private const val STATE_SERIAL = "wifi_pending_serial"
         private const val DEFAULT_SSID = "The network"
+        private const val REFUSED = "Android refused the network settings. Update the app."
 
         /** EAP-TTLS, inner PAP, the lab CA and the server name check (see core/WifiPlan.kt). */
         fun enterpriseConfig(plan: WifiPlan, password: String) = WifiEnterpriseConfig().apply {
@@ -107,10 +142,23 @@ class WifiInstaller(
             setAltSubjectMatch(plan.altSubjectMatch)
         }
 
-        fun suggestion(plan: WifiPlan, password: String): WifiNetworkSuggestion {
+        /**
+         * EAP-TLS with the phone's key and certificate chain, the lab CA and the server name check
+         * (see core/WifiPlan.kt, TlsPlan). The identity is the uid, the CN of the certificate.
+         */
+        fun tlsEnterpriseConfig(plan: TlsPlan, credential: TlsCredential) = WifiEnterpriseConfig().apply {
+            setEapMethod(WifiEnterpriseConfig.Eap.TLS)
+            setIdentity(plan.identity)
+            setClientKeyEntryWithCertificateChain(credential.privateKey, credential.chain.toTypedArray())
+            setCaCertificate(plan.caCertificate)
+            setDomainSuffixMatch(plan.domainSuffixMatch)
+            setAltSubjectMatch(plan.altSubjectMatch)
+        }
+
+        fun suggestion(ssid: String, config: WifiEnterpriseConfig): WifiNetworkSuggestion {
             val builder = WifiNetworkSuggestion.Builder()
-                .setSsid(plan.ssid)
-                .setWpa2EnterpriseConfig(enterpriseConfig(plan, password))
+                .setSsid(ssid)
+                .setWpa2EnterpriseConfig(config)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) persistentMac(builder)
             return builder.build()
         }

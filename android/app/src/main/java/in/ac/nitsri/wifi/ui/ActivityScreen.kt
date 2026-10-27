@@ -7,6 +7,7 @@ import `in`.ac.nitsri.wifi.R
 import `in`.ac.nitsri.wifi.core.Alert
 import `in`.ac.nitsri.wifi.core.Alerts
 import `in`.ac.nitsri.wifi.core.ApiClient
+import `in`.ac.nitsri.wifi.core.CertMessages
 import `in`.ac.nitsri.wifi.core.Formats
 import `in`.ac.nitsri.wifi.core.SignInActivity
 import `in`.ac.nitsri.wifi.databinding.ItemAlertBinding
@@ -75,7 +76,9 @@ class ActivityScreen(private val host: HomeActivity, private val b: ScreenActivi
                 if (r.verdict == ApiClient.VERDICT_ME) {
                     b.status.status(host.getString(R.string.alert_reviewed, mac), Status.OK)
                 } else {
-                    b.status.status(Formats.disconnectResults(r.disconnect.orEmpty(), null), Status.INFO)
+                    val revoked = CertMessages.afterNotMe(r)
+                    val text = Formats.disconnectResults(r.disconnect.orEmpty(), null)
+                    b.status.status(if (revoked.isEmpty()) text else "$text\n$revoked", Status.INFO)
                 }
                 load()
                 if (r.next == ApiClient.NEXT_PASSWORD) host.openChangePassword()

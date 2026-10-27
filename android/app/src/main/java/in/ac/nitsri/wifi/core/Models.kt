@@ -46,7 +46,19 @@ data class Alert(val mac: String, val firstSeen: String?, val lastSeen: String?,
 
 data class Alerts(val count: Int, val alerts: List<Alert>)
 
-data class Review(val mac: String, val verdict: String, val disconnect: List<NasResult>?, val next: String?)
+/**
+ * The answer to `POST /alerts/{mac}`. [revoked] and [revokeFailed] (docs/api/v1.md section 7) are
+ * the serials of the device's certificates that "Not me" revoked or could not revoke; null for
+ * "This was me" and on a portal without certificates.
+ */
+data class Review(
+    val mac: String,
+    val verdict: String,
+    val disconnect: List<NasResult>?,
+    val next: String?,
+    val revoked: List<String>? = null,
+    val revokeFailed: List<String>? = null,
+)
 
 data class AndroidProfile(
     val ssid: String,
@@ -58,6 +70,32 @@ data class AndroidProfile(
     val altSubjectMatch: String?,
     val caPem: String,
 )
+
+/** One device certificate of `GET /certs` (docs/api/v1.md section 6). */
+data class DeviceCert(
+    val serial: String,
+    val label: String,
+    val issuedAt: String?,
+    val notAfter: String?,
+    val revokedAt: String?,
+    val revokeReason: String?,
+    val via: String?,
+    val active: Boolean,
+)
+
+data class CertList(val limit: Int?, val certs: List<DeviceCert>)
+
+/** The answer to `POST /certs`: the new certificate and its chain (Device CA, then root CA). */
+data class IssuedCert(
+    val serial: String,
+    val label: String,
+    val issuedAt: String?,
+    val notAfter: String?,
+    val certPem: String,
+    val chainPem: String?,
+)
+
+data class RevokeResult(val serial: String, val revokedAt: String?, val disconnect: List<NasResult>)
 
 /** JSON to models. Throws [JSONException] when a required field is missing or has the wrong type. */
 internal object Parse {
@@ -112,6 +150,39 @@ internal object Parse {
         verdict = o.str("verdict"),
         disconnect = if (o.isNull("disconnect")) null else nasResults(o.getJSONArray("disconnect")),
         next = o.strOrNull("next"),
+        revoked = o.strListOrNull("revoked"),
+        revokeFailed = o.strListOrNull("revoke_failed"),
+    )
+
+    fun certList(o: JSONObject) = CertList(
+        limit = o.intOrNull("limit"),
+        certs = o.list("certs") {
+            DeviceCert(
+                serial = it.str("serial"),
+                label = it.str("label"),
+                issuedAt = it.strOrNull("issued_at"),
+                notAfter = it.strOrNull("not_after"),
+                revokedAt = it.strOrNull("revoked_at"),
+                revokeReason = it.strOrNull("revoke_reason"),
+                via = it.strOrNull("via"),
+                active = it.getBoolean("active"),
+            )
+        },
+    )
+
+    fun issuedCert(o: JSONObject) = IssuedCert(
+        serial = o.str("serial"),
+        label = o.str("label"),
+        issuedAt = o.strOrNull("issued_at"),
+        notAfter = o.strOrNull("not_after"),
+        certPem = o.str("cert_pem"),
+        chainPem = o.strOrNull("chain_pem"),
+    )
+
+    fun revoke(o: JSONObject) = RevokeResult(
+        serial = o.str("serial"),
+        revokedAt = o.strOrNull("revoked_at"),
+        disconnect = if (o.isNull("disconnect")) emptyList() else nasResults(o.getJSONArray("disconnect")),
     )
 
     fun androidProfile(o: JSONObject) = AndroidProfile(
@@ -139,6 +210,13 @@ internal object Parse {
 
     private fun JSONObject.strOrNull(key: String): String? =
         if (isNull(key)) null else get(key) as? String ?: throw JSONException("$key is not a string")
+
+    /** Absent (older portals) or null: null. Present: a list of strings. */
+    private fun JSONObject.strListOrNull(key: String): List<String>? {
+        if (isNull(key)) return null
+        val a = getJSONArray(key)
+        return (0 until a.length()).map { a.get(it) as? String ?: throw JSONException("$key holds a non-string") }
+    }
 
     private fun JSONObject.intOrNull(key: String): Int? = if (isNull(key)) null else getInt(key)
 

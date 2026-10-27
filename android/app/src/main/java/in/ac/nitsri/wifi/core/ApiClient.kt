@@ -65,7 +65,29 @@ class ApiClient(
         return read(call("POST", "/alerts/$mac", JSONObject().put("verdict", verdict)), Parse::review)
     }
 
-    fun androidProfile(): AndroidProfile = get("/profiles/android", Parse::androidProfile)
+    /** `GET /profiles/android`: [METHOD_TTLS] (section 5, the default) or [METHOD_TLS] (section 7). */
+    fun androidProfile(method: String = METHOD_TTLS): AndroidProfile {
+        require(method == METHOD_TTLS || method == METHOD_TLS)
+        val path = if (method == METHOD_TLS) "/profiles/android?method=tls" else "/profiles/android"
+        return get(path, Parse::androidProfile)
+    }
+
+    /**
+     * `POST /certs`: the server signs [csrPem] (made on this phone; the private key never leaves
+     * it). A user with 3 active certificates gets `409 cert_limit` ([ApiException.certLimit]).
+     */
+    fun issueCert(csrPem: String, label: String): IssuedCert {
+        val body = JSONObject().put("csr_pem", csrPem).put("label", label)
+        return read(call("POST", "/certs", body), Parse::issuedCert)
+    }
+
+    fun certs(): CertList = get("/certs", Parse::certList)
+
+    /** `DELETE /certs/{serial}`. A second call for the same serial gives the first `revoked_at`. */
+    fun revokeCert(serial: String): RevokeResult {
+        if (!SERIAL.matches(serial)) throw ApiException(400, "invalid_input", "That is not a valid certificate serial.")
+        return read(call("DELETE", "/certs/$serial", null), Parse::revoke)
+    }
 
     fun logout() = tokens.clear()
 
@@ -130,6 +152,11 @@ class ApiClient(
         const val VERDICT_ME = "me"
         const val VERDICT_NOT_ME = "not_me"
         const val NEXT_PASSWORD = "password"
+        const val METHOD_TTLS = "ttls"
+        const val METHOD_TLS = "tls"
+
+        /** Certificate serials are lower-case hexadecimal (docs/api/v1.md section 6). */
+        val SERIAL = Regex("[0-9a-f]{1,64}")
 
         /** The MAC form that the server accepts (docs/api/v1.md section 1.1). */
         val MAC = Regex("[0-9A-Za-z:.-]{1,40}")
