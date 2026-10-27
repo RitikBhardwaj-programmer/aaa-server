@@ -1,0 +1,27 @@
+{# New-device alerts on the devices page (activity.py). Included by devices.html, which has no head
+   block of its own, so the stylesheet link is here (a body stylesheet link is valid HTML). #}
+{% set alerts = new_device_alerts() %}
+{% if alerts is none %}
+<p class="note info" role="status">New-device alerts are temporarily unavailable.</p>
+{% elif alerts %}
+<link rel="stylesheet" href="{{ url_for('static', filename='activity.css') }}">
+<section class="note info alerts" aria-labelledby="alerts-title">
+  <h2 id="alerts-title">{{ alerts|length }} new {{ 'device' if alerts|length == 1 else 'devices' }} signed in</h2>
+  <p>Your ID was used on {{ 'a device' if alerts|length == 1 else 'devices' }} that you did not use before. If you do not know {{ 'it' if alerts|length == 1 else 'one of them' }}, choose "Not me": the portal disconnects it and opens the password change.</p>
+  <ul class="alert-list">
+    {% for a in alerts %}
+    <li>
+      <p class="alert-mac"><span class="num">{{ a.mac }}</span>{% if a.private_mac %} <span class="tag">private address</span>{% endif %}{% if a.online %} <span class="on">online</span>{% endif %}</p>
+      <p class="hint">First seen {{ a.first_seen|when }}. Last seen {{ a.last_seen|when }}.</p>
+      <form method="post" action="{{ url_for('activity.review') }}" class="alert-actions">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="mac" value="{{ a.mac }}">
+        <button type="submit" name="verdict" value="me" class="secondary" aria-label="Device {{ a.mac }}: this was me">This was me</button>
+        <button type="submit" name="verdict" value="not_me" class="secondary danger" aria-label="Device {{ a.mac }}: not me">Not me</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="hint"><a href="{{ url_for('activity.page') }}">See all sign-in activity</a></p>
+</section>
+{% endif %}

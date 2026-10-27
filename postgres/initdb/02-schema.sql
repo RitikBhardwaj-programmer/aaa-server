@@ -187,3 +187,8 @@ RESET ROLE;
 
 -- Read-only role for the self-service portal; needs the superuser, so it comes after RESET ROLE
 \i /migrations/002-portal-role.sql
+
+-- Portal sign-in history (function portal_signins) and alert reviews (table device_reviews).
+-- Both need the role "portal"; each file makes its objects as role radius (SET ROLE in the file).
+\i /migrations/004-portal-signins.sql
+\i /migrations/005-device-reviews.sql

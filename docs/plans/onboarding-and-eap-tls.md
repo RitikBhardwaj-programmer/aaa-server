@@ -158,6 +158,13 @@ Each real-device test gets an experiment note (`lab-experiment-log`).
 9. Onboarding SSID with a walled garden.
 10. MPSK for consoles: uncertain on Aruba Instant without ClearPass.
 
+From the S2 security review (PR #5, 2026-10-27; no Blocker or High; L1 fixed in the PR):
+- **M1** Reject rows can flood a user's sign-in history. Rejects are logged under the outer `User-Name`, which anyone can set, so fake "Refused" rows can push real logins past the 100-row cap of `portal_signins`. Fix: separate caps for accepts and rejects, or group rejects (count, first and last time); log outer-only rejects under a marker name.
+- **M2** Role `portal` can SELECT all of `radacct` (every user's AP and Class), so "users see only their own rows" holds in the app, not in the database. Not new in S2. Fix: say so in the DPDP notes now; later replace the `radacct` grant with per-user SECURITY DEFINER functions.
+- **L3** No rate limit on the "This was me" verdict. Fix: reuse an existing limiter.
+- **L4** An alert can never be dismissed when its `user_devices.callingstationid` fails `MAC_RE`. Fix: validate MACs when the row is written (trigger), or review by a server-side key.
+- **L5** The banner opens a second unpooled database connection on every `/devices` render and, with alerts, runs `live_sessions` twice. Fix: reuse the page's connection and live sessions, or add a pool.
+
 ## Routing card
 | Phase | Agent | Model | Effort | Why |
 |---|---|---|---|---|
